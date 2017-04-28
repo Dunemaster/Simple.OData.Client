@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
+#pragma warning disable 1591
+
 namespace Simple.OData.Client.Extensions
 {
     public static class MemberInfoExtensions
@@ -20,29 +22,38 @@ namespace Simple.OData.Client.Extensions
             return member.GetCustomAttributes().Any(x => x.GetType().Name == "NotMappedAttribute");
         }
 
-        public static string GetMappedName(this PropertyInfo property)
+        public static string GetMappedName(this MemberInfo property)
         {
-            string attributeName;
+            var supportedAttributeNames = new[]
+            {
+                "DataAttribute",
+                "DataMemberAttribute",
+                "ColumnAttribute",
+            };
+
             var propertyName = property.Name;
+            string attributeProperty;
             var mappingAttribute = property.GetCustomAttributes()
-                .FirstOrDefault(x => x.GetType().Name == "DataAttribute" || x.GetType().Name == "ColumnAttribute");
+                .FirstOrDefault(x => supportedAttributeNames.Any(y => x.GetType().Name == y));
             if (mappingAttribute != null)
             {
-                attributeName = "Name";
+                attributeProperty = "Name";
             }
             else
             {
-                attributeName = "PropertyName";
+                attributeProperty = "PropertyName";
                 mappingAttribute = property.GetCustomAttributes()
-                    .FirstOrDefault(x => x.GetType().GetAnyProperty(attributeName) != null);
+                    .FirstOrDefault(x => x.GetType().GetAnyProperty(attributeProperty) != null);
             }
 
             if (mappingAttribute != null)
             {
-                var nameProperty = mappingAttribute.GetType().GetAnyProperty(attributeName);
+                var nameProperty = mappingAttribute.GetType().GetAnyProperty(attributeProperty);
                 if (nameProperty != null)
                 {
-                    propertyName = nameProperty.GetValue(mappingAttribute, null).ToString();
+                    var propertyValue = nameProperty.GetValue(mappingAttribute, null);
+                    if (propertyValue != null)
+                        propertyName = propertyValue.ToString();
                 }
             }
 

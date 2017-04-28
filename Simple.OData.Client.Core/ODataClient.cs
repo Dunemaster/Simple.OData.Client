@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Simple.OData.Client.Extensions;
 
 namespace Simple.OData.Client
 {
@@ -11,15 +10,29 @@ namespace Simple.OData.Client
     {
         private readonly ODataClientSettings _settings;
         private readonly Session _session;
-        private readonly RequestBuilder _requestBuilder;
         private readonly RequestRunner _requestRunner;
+        private readonly Lazy<IBatchWriter> _lazyBatchWriter;
+        private readonly SimpleDictionary<object, IDictionary<string, object>> _batchEntries;
+        private readonly ODataResponse _batchResponse;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ODataClient"/> class.
         /// </summary>
-        /// <param name="urlBase">The OData service URL.</param>
-        public ODataClient(string urlBase)
-            : this(new ODataClientSettings {UrlBase = urlBase})
+        /// <param name="baseUri">The OData service URL.</param>
+        /// <remarks>
+        /// This constructor overload is obsolete. Use <see cref="ODataClient(Uri)"/> constructor overload./>
+        /// </remarks>
+        public ODataClient(string baseUri)
+            : this(new ODataClientSettings {BaseUri = new Uri(baseUri)})
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ODataClient"/> class.
+        /// </summary>
+        /// <param name="baseUri">The OData service URL.</param>
+        public ODataClient(Uri baseUri)
+            : this(new ODataClientSettings { BaseUri = baseUri })
         {
         }
 
@@ -31,30 +44,42 @@ namespace Simple.OData.Client
         {
             _settings = settings;
             _session = Session.FromSettings(_settings);
-
-            _requestBuilder = new RequestBuilder(_session);
             _requestRunner = new RequestRunner(_session);
-            _requestRunner.BeforeRequest = _settings.BeforeRequest;
-            _requestRunner.AfterResponse = _settings.AfterResponse;
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ODataClient"/> class.
-        /// </summary>
-        /// <param name="batch">The OData batch instance.</param>
-        public ODataClient(ODataBatch batch)
+        internal ODataClient(ODataClientSettings settings, SimpleDictionary<object, IDictionary<string, object>> batchEntries)
+            : this(settings)
         {
-            _settings = batch.Settings;
-            _session = Session.FromSettings(_settings);
-
-            _requestBuilder = batch.RequestBuilder;
-            _requestRunner = batch.RequestRunner;
+            if (batchEntries != null)
+            {
+                _batchEntries = batchEntries;
+                _lazyBatchWriter = new Lazy<IBatchWriter>(() => _session.Adapter.GetBatchWriter(_batchEntries));
+            }
         }
 
-        internal Session Session
+        internal ODataClient(ODataClient client, SimpleDictionary<object, IDictionary<string, object>> batchEntries)
         {
-            get { return _session; }
+            _settings = client._settings;
+            _session = client.Session;
+            _requestRunner = client._requestRunner;
+            if (batchEntries != null)
+            {
+                _batchEntries = batchEntries;
+                _lazyBatchWriter = new Lazy<IBatchWriter>(() => _session.Adapter.GetBatchWriter(_batchEntries));
+            }
         }
+
+        internal ODataClient(ODataClient client, ODataResponse batchResponse)
+        {
+            _session = client.Session;
+            _batchResponse = batchResponse;
+        }
+
+        internal Session Session { get { return _session; } }
+        internal ODataResponse BatchResponse { get { return _batchResponse; } }
+        internal bool IsBatchRequest { get { return _lazyBatchWriter != null; } }
+        internal bool IsBatchResponse { get { return _batchResponse != null; } }
+        internal SimpleDictionary<object, IDictionary<string, object>> BatchEntries { get { return _batchEntries; } }
 
         /// <summary>
         /// Parses the OData service metadata string.
@@ -66,8 +91,19 @@ namespace Simple.OData.Client
         /// </returns>
         public static T ParseMetadataString<T>(string metadataString)
         {
-            var session = Session.FromMetadata("http://localhost/" + metadataString.GetHashCode() + "$metadata", metadataString);
+            var session = Session.FromMetadata(new Uri("http://localhost/" + metadataString.GetHashCode() + "$metadata"), metadataString);
             return (T)session.Adapter.Model;
+        }
+
+        /// <summary>
+        /// Clears service metadata cache.
+        /// </summary>
+        public static void ClearMetadataCache()
+        {
+            lock (MetadataCache.Instances)
+            {
+                MetadataCache.Instances.Clear();
+            }
         }
 
         /// <summary>
@@ -77,7 +113,7 @@ namespace Simple.OData.Client
         /// <returns>
         /// The fluent OData client instance.
         /// </returns>
-        public IFluentClient<IDictionary<string, object>> For(string collectionName)
+        public IBoundClient<IDictionary<string, object>> For(string collectionName)
         {
             return GetFluentClient().For(collectionName);
         }
@@ -89,9 +125,9 @@ namespace Simple.OData.Client
         /// <returns>
         /// The fluent OData client instance.
         /// </returns>
-        public IFluentClient<ODataEntry> For(ODataExpression expression)
+        public IBoundClient<ODataEntry> For(ODataExpression expression)
         {
-            return new FluentClient<ODataEntry>(this, _session).For(expression);
+            return new BoundClient<ODataEntry>(this, _session).For(expression);
         }
 
         /// <summary>
@@ -102,15 +138,40 @@ namespace Simple.OData.Client
         /// <returns>
         /// The fluent OData client instance.
         /// </returns>
-        public IFluentClient<T> For<T>(string collectionName = null)
+        public IBoundClient<T> For<T>(string collectionName = null)
             where T : class
         {
-            return new FluentClient<T>(this, _session).For(collectionName);
+            return new BoundClient<T>(this, _session).For(collectionName);
         }
 
-        private FluentClient<IDictionary<string, object>> GetFluentClient()
+        /// <summary>
+        /// Returns an instance of a fluent OData client for unbound operations (functions and actions).
+        /// </summary>
+        /// <returns>The fluent OData client instance.</returns>
+        public IUnboundClient<object> Unbound()
         {
-            return new FluentClient<IDictionary<string, object>>(this, _session);
+            return GetUnboundClient<object>();
+        }
+
+        /// <summary>
+        /// Returns an instance of a fluent OData client for unbound operations (functions and actions).
+        /// </summary>
+        /// <returns>The fluent OData client instance.</returns>
+        public IUnboundClient<T> Unbound<T>()
+            where T : class
+        {
+            return GetUnboundClient<T>();
+        }
+
+        private BoundClient<IDictionary<string, object>> GetFluentClient()
+        {
+            return new BoundClient<IDictionary<string, object>>(this, _session);
+        }
+
+        private UnboundClient<T> GetUnboundClient<T>()
+            where T : class
+        {
+            return new UnboundClient<T>(this, _session);
         }
 
         /// <summary>
@@ -120,6 +181,28 @@ namespace Simple.OData.Client
         public void SetPluralizer(IPluralizer pluralizer)
         {
             _session.Pluralizer = pluralizer;
+        }
+
+        /// <summary>
+        /// Allows callers to manipulate the request headers in between request executions.
+        /// Useful for retrieval of x-csrf-tokens when you want to update the request header
+        /// with the retrieved token on subsequent requests.
+        /// </summary>
+        /// <param name="headers">The list of headers to update.</param>
+        public void UpdateRequestHeaders(Dictionary<string, IEnumerable<string>> headers)
+        {
+            _settings.BeforeRequest += (request) =>
+            {
+                foreach (var header in headers)
+                {
+                    if (request.Headers.Contains(header.Key))
+                    {
+                        request.Headers.Remove(header.Key);
+                    }
+
+                    request.Headers.Add(header.Key, header.Value);
+                }
+            };
         }
     }
 }

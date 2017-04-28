@@ -87,5 +87,49 @@ namespace Simple.OData.Client.Tests
                 .FindEntryAsync();
             Assert.True(category.Products.Count() == 1);
         }
+
+        [Fact]
+        public async Task InsertCategoryWithPictureAsBytes()
+        {
+            var category = await _client
+                .For<Category>()
+                .Set(new { CategoryName = "Test7", Picture = new byte[] {1,2,3,4,5} })
+                .InsertEntryAsync();
+
+            category = await _client
+                .For<Category>()
+                .Expand(x => new { x.Products })
+                .Filter(x => x.CategoryName == "Test7")
+                .FindEntryAsync();
+            Assert.True(category.Picture.Length > 0);
+        }
+
+        [Fact]
+        public async Task InsertCategoryWithPictureAsString()
+        {
+            var category = await _client
+                .For<Category>()
+                .Set(new { CategoryName = "Test7", Picture = Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5 }) })
+                .InsertEntryAsync();
+
+            category = await _client
+                .For<Category>()
+                .Expand(x => new { x.Products })
+                .Filter(x => x.CategoryName == "Test7")
+                .FindEntryAsync();
+            Assert.True(category.Picture.Length > 0);
+        }
+        
+        [Fact]
+        public async Task InsertShip()
+        {
+            var ship = await _client
+                .For<Transport>()
+                .As<Ship>()
+                .Set(new Ship { ShipName = "Test1" })
+                .InsertEntryAsync();
+
+            Assert.Equal("Test1", ship.ShipName);
+        }
     }
 }

@@ -6,6 +6,7 @@ namespace Simple.OData.Client.Tests
     {
         public int CategoryID { get; set; }
         public string CategoryName { get; set; }
+        public byte[] Picture { get; set; }
  
         public Product[] Products { get; set; }
     }
@@ -32,5 +33,13 @@ namespace Simple.OData.Client.Tests
         public string CategoryName { get; set; }
 
         public ICollection<Product> Products { get; set; }
+    }
+
+    public class CategoryWithHashSet
+    {
+        public int CategoryID { get; set; }
+        public string CategoryName { get; set; }
+
+        public HashSet<Product> Products { get; set; }
     }
 }

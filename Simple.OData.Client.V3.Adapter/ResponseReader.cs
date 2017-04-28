@@ -1,16 +1,20 @@
-﻿using System;
+﻿using Microsoft.Data.Edm;
+using Microsoft.Data.OData;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Microsoft.Data.Edm;
-using Microsoft.Data.OData;
+
+#pragma warning disable 1591
 
 namespace Simple.OData.Client.V3.Adapter
 {
     public class ResponseReader : ResponseReaderBase
     {
         private readonly IEdmModel _model;
+        private bool _hasResponse = false;
 
         public ResponseReader(ISession session, IEdmModel model)
             : base(session)
@@ -18,40 +22,34 @@ namespace Simple.OData.Client.V3.Adapter
             _model = model;
         }
 
-        public override Task<ODataResponse> GetResponseAsync(HttpResponseMessage responseMessage, bool includeResourceTypeInEntryProperties = false)
+        public override Task<ODataResponse> GetResponseAsync(HttpResponseMessage responseMessage)
         {
-            return GetResponseAsync(new ODataResponseMessage(responseMessage), includeResourceTypeInEntryProperties);
-        }
-
-        protected override void ConvertEntry(ResponseNode entryNode, object entry, bool includeResourceTypeInEntryProperties)
-        {
-            if (entry != null)
-            {
-                var odataEntry = entry as Microsoft.Data.OData.ODataEntry;
-                foreach (var property in odataEntry.Properties)
-                {
-                    entryNode.Entry.Add(property.Name, GetPropertyValue(property.Value));
-                }
-                if (includeResourceTypeInEntryProperties)
-                {
-                    var resourceType = odataEntry.TypeName;
-                    entryNode.Entry.Add(FluentCommand.ResourceTypeLiteral, resourceType.Split('.').Last());
-                }
-            }
+            return GetResponseAsync(new ODataResponseMessage(responseMessage));
         }
 
 #if SILVERLIGHT
-        public async Task<ODataResponse> GetResponseAsync(IODataResponseMessage responseMessage, bool includeResourceTypeInEntryProperties = false)
+        public async Task<ODataResponse> GetResponseAsync(IODataResponseMessage responseMessage)
 #else
-        public async Task<ODataResponse> GetResponseAsync(IODataResponseMessageAsync responseMessage, bool includeResourceTypeInEntryProperties = false)
+
+        public async Task<ODataResponse> GetResponseAsync(IODataResponseMessageAsync responseMessage)
 #endif
         {
             var readerSettings = new ODataMessageReaderSettings();
+            if (_session.Settings.IgnoreUnmappedProperties)
+                readerSettings.UndeclaredPropertyBehaviorKinds = ODataUndeclaredPropertyBehaviorKinds.IgnoreUndeclaredValueProperty;
             readerSettings.MessageQuotas.MaxReceivedMessageSize = Int32.MaxValue;
+            readerSettings.ShouldIncludeAnnotation = x => _session.Settings.IncludeAnnotationsInResults;
             using (var messageReader = new ODataMessageReader(responseMessage, readerSettings, _model))
             {
                 var payloadKind = messageReader.DetectPayloadKind();
-                if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Value))
+                if (payloadKind.Any(x => x.PayloadKind != ODataPayloadKind.Property))
+                    _hasResponse = true;
+
+                if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Error))
+                {
+                    return ODataResponse.FromStatusCode(responseMessage.StatusCode);
+                }
+                else if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Value))
                 {
                     if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Collection))
                     {
@@ -60,34 +58,83 @@ namespace Simple.OData.Client.V3.Adapter
                     else
                     {
 #if SILVERLIGHT
-                        var text = Utils.StreamToString(responseMessage.GetStream());
+                        var stream = responseMessage.GetStream();
 #else
-                        var text = Client.Utils.StreamToString(await responseMessage.GetStreamAsync());
+                        var stream = await responseMessage.GetStreamAsync().ConfigureAwait(false);
 #endif
-                        return ODataResponse.FromFeed(new[] { new Dictionary<string, object>() { { FluentCommand.ResultLiteral, text } } });
+                        return ODataResponse.FromValueStream(stream, responseMessage is ODataBatchOperationResponseMessage);
                     }
                 }
-                if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Feed))
+                else if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Batch))
                 {
-                    return ReadResponse(messageReader.CreateODataFeedReader(), includeResourceTypeInEntryProperties);
+                    return await ReadResponse(messageReader.CreateODataBatchReader()).ConfigureAwait(false);
+                }
+                else if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Feed))
+                {
+                    return ReadResponse(messageReader.CreateODataFeedReader());
                 }
                 else if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Collection))
                 {
-                    return ReadResponse(messageReader.CreateODataCollectionReader(), includeResourceTypeInEntryProperties);
+                    return ReadResponse(messageReader.CreateODataCollectionReader());
                 }
                 else if (payloadKind.Any(x => x.PayloadKind == ODataPayloadKind.Property))
                 {
                     var property = messageReader.ReadProperty();
-                    return ODataResponse.FromFeed(new[] { new Dictionary<string, object>() { { property.Name, GetPropertyValue(property.Value) } } });
+                    if (property.Value != null && (property.Value.GetType() != typeof(string) || !string.IsNullOrEmpty(property.Value.ToString())))
+                        _hasResponse = true;
+
+                    if (_hasResponse)
+                    {
+                        return ODataResponse.FromProperty(property.Name, GetPropertyValue(property.Value));
+                    }
+                    else
+                    {
+                        return ODataResponse.EmptyFeed;
+                    }
                 }
                 else
                 {
-                    return ReadResponse(messageReader.CreateODataEntryReader(), includeResourceTypeInEntryProperties);
+                    return ReadResponse(messageReader.CreateODataEntryReader());
                 }
             }
         }
 
-        private ODataResponse ReadResponse(ODataCollectionReader odataReader, bool includeResourceTypeInEntryProperties)
+        private async Task<ODataResponse> ReadResponse(ODataBatchReader odataReader)
+        {
+            var batch = new List<ODataResponse>();
+
+            while (odataReader.Read())
+            {
+                switch (odataReader.State)
+                {
+                    case ODataBatchReaderState.ChangesetStart:
+                        break;
+
+                    case ODataBatchReaderState.Operation:
+                        var operationMessage = odataReader.CreateOperationResponseMessage();
+                        if (operationMessage.StatusCode == (int)HttpStatusCode.NoContent)
+                            batch.Add(ODataResponse.FromStatusCode(operationMessage.StatusCode));
+                        else if (operationMessage.StatusCode >= (int)HttpStatusCode.BadRequest)
+                            batch.Add(ODataResponse.FromStatusCode(
+                                operationMessage.StatusCode,
+#if SILVERLIGHT
+                                operationMessage.GetStream()));
+#else
+                                await operationMessage.GetStreamAsync().ConfigureAwait(false)));
+#endif
+                        else
+                            batch.Add(await GetResponseAsync(operationMessage).ConfigureAwait(false));
+                        break;
+
+                    case ODataBatchReaderState.ChangesetEnd:
+                        break;
+                }
+            }
+
+            return ODataResponse.FromBatch(batch);
+        }
+
+        private ODataResponse ReadResponse(ODataCollectionReader odataReader)
         {
             var collection = new List<object>();
 
@@ -113,7 +160,7 @@ namespace Simple.OData.Client.V3.Adapter
             return ODataResponse.FromCollection(collection);
         }
 
-        private ODataResponse ReadResponse(ODataReader odataReader, bool includeResourceTypeInEntryProperties)
+        private ODataResponse ReadResponse(ODataReader odataReader)
         {
             ResponseNode rootNode = null;
             var nodeStack = new Stack<ResponseNode>();
@@ -126,11 +173,11 @@ namespace Simple.OData.Client.V3.Adapter
                 switch (odataReader.State)
                 {
                     case ODataReaderState.FeedStart:
-                        StartFeed(nodeStack, (odataReader.Item as ODataFeed).Count);
+                        StartFeed(nodeStack, CreateAnnotations(odataReader.Item as ODataFeed));
                         break;
 
                     case ODataReaderState.FeedEnd:
-                        EndFeed(nodeStack, ref rootNode);
+                        EndFeed(nodeStack, CreateAnnotations(odataReader.Item as ODataFeed), ref rootNode);
                         break;
 
                     case ODataReaderState.EntryStart:
@@ -138,7 +185,7 @@ namespace Simple.OData.Client.V3.Adapter
                         break;
 
                     case ODataReaderState.EntryEnd:
-                        EndEntry(nodeStack, ref rootNode, odataReader.Item, includeResourceTypeInEntryProperties);
+                        EndEntry(nodeStack, ref rootNode, odataReader.Item);
                         break;
 
                     case ODataReaderState.NavigationLinkStart:
@@ -151,9 +198,82 @@ namespace Simple.OData.Client.V3.Adapter
                 }
             }
 
-            return rootNode.Feed != null
-                ? ODataResponse.FromFeed(rootNode.Feed, rootNode.TotalCount)
-                : ODataResponse.FromEntry(rootNode.Entry);
+            return ODataResponse.FromNode(rootNode);
+        }
+
+        protected override void ConvertEntry(ResponseNode entryNode, object entry)
+        {
+            if (entry != null)
+            {
+                var odataEntry = entry as Microsoft.Data.OData.ODataEntry;
+                foreach (var property in odataEntry.Properties)
+                {
+                    entryNode.Entry.Data.Add(property.Name, GetPropertyValue(property.Value));
+                }
+                entryNode.Entry.SetAnnotations(CreateAnnotations(odataEntry));
+            }
+        }
+
+        private ODataFeedAnnotations CreateAnnotations(ODataFeed feed)
+        {
+            return new ODataFeedAnnotations()
+            {
+                Id = feed.Id,
+                Count = feed.Count,
+                DeltaLink = feed.DeltaLink,
+                NextPageLink = feed.NextPageLink,
+                InstanceAnnotations = feed.InstanceAnnotations,
+            };
+        }
+
+        private ODataEntryAnnotations CreateAnnotations(Microsoft.Data.OData.ODataEntry odataEntry)
+        {
+            string id = null;
+            Uri readLink = null;
+            Uri editLink = null;
+            if (_session.Adapter.GetMetadata().IsTypeWithId(odataEntry.TypeName))
+            {
+                try
+                {
+                    id = odataEntry.Id;
+                    readLink = odataEntry.ReadLink;
+                    editLink = odataEntry.EditLink;
+                }
+                catch (Exception)
+                {
+                    // Ignored
+                }
+            }
+
+            return new ODataEntryAnnotations
+            {
+                Id = id,
+                TypeName = odataEntry.TypeName,
+                ReadLink = readLink,
+                EditLink = editLink,
+                ETag = odataEntry.ETag,
+                AssociationLinks = odataEntry.AssociationLinks == null
+                    ? null
+                    : new List<ODataEntryAnnotations.AssociationLink>(
+                    odataEntry.AssociationLinks.Select(x => new ODataEntryAnnotations.AssociationLink
+                    {
+                        Name = x.Name,
+                        Uri = x.Url,
+                    })),
+                MediaResource = CreateAnnotations(odataEntry.MediaResource),
+                InstanceAnnotations = odataEntry.InstanceAnnotations,
+            };
+        }
+
+        private ODataMediaAnnotations CreateAnnotations(ODataStreamReferenceValue value)
+        {
+            return value == null ? null : new ODataMediaAnnotations
+            {
+                ContentType = value.ContentType,
+                ReadLink = value.ReadLink,
+                EditLink = value.EditLink,
+                ETag = value.ETag,
+            };
         }
 
         private object GetPropertyValue(object value)
@@ -167,6 +287,10 @@ namespace Simple.OData.Client.V3.Adapter
             {
                 return (value as ODataCollectionValue).Items.Cast<object>()
                     .Select(GetPropertyValue).ToList();
+            }
+            else if (value is ODataStreamReferenceValue)
+            {
+                return CreateAnnotations(value as ODataStreamReferenceValue);
             }
             else
             {

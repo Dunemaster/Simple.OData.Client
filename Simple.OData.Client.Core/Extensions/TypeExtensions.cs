@@ -36,9 +36,12 @@ namespace Simple.OData.Client.Extensions
             return type.GetFields(BindingFlags.Instance | BindingFlags.Public);
         }
 
-        public static FieldInfo GetAnyField(this Type type, string fieldName)
+        public static FieldInfo GetAnyField(this Type type, string fieldName, bool includeNonPublic = false)
         {
-            var field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public);
+            var bindingFlags = BindingFlags.Instance | BindingFlags.Public;
+            if (includeNonPublic)
+                bindingFlags |= BindingFlags.NonPublic;
+            var field = type.GetField(fieldName, bindingFlags);
             return field == null || field.DeclaringType == typeof (object) ? null : field;
         }
 
@@ -47,9 +50,12 @@ namespace Simple.OData.Client.Extensions
             return type.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly);
         }
 
-        public static FieldInfo GetDeclaredField(this Type type, string fieldName)
+        public static FieldInfo GetDeclaredField(this Type type, string fieldName, bool includeNonPublic = false)
         {
-            return type.GetField(fieldName, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly);
+            var bindingFlags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly;
+            if (includeNonPublic)
+                bindingFlags |= BindingFlags.NonPublic;
+            return type.GetField(fieldName, bindingFlags);
         }
 
         public static MethodInfo GetDeclaredMethod(this Type type, string methodName)
@@ -101,10 +107,15 @@ namespace Simple.OData.Client.Extensions
         {
             return type.IsEnum;
         }
+
+        public static Type GetBaseType(this Type type)
+        {
+            return type.BaseType;
+        }
 #else
         public static IEnumerable<PropertyInfo> GetAllProperties(this Type type)
         {
-            var properties = type.GetTypeInfo().DeclaredProperties.ToList();
+            var properties = GetDeclaredProperties(type).ToList();
 
             var baseType = type.GetTypeInfo().BaseType;
             if (baseType != null && baseType != typeof(object))
@@ -116,20 +127,26 @@ namespace Simple.OData.Client.Extensions
         public static PropertyInfo GetAnyProperty(this Type type, string propertyName)
         {
             var currentType = type;
-            while (currentType != null && currentType != typeof (object))
+            while (currentType != null && currentType != typeof(object))
             {
                 var property = currentType.GetTypeInfo().GetDeclaredProperty(propertyName);
-                    if (property != null)
-                        return property;
+                if (property != null)
+                    return property;
 
                 currentType = currentType.GetTypeInfo().BaseType;
             }
             return null;
         }
 
+        private static bool IsInstanceProperty(PropertyInfo propertyInfo)
+        {
+            return (propertyInfo.CanRead && !propertyInfo.GetMethod.IsStatic)
+                || (propertyInfo.CanWrite && !propertyInfo.SetMethod.IsStatic);
+        }
+
         public static IEnumerable<PropertyInfo> GetDeclaredProperties(this Type type)
         {
-            return type.GetTypeInfo().DeclaredProperties;
+            return type.GetTypeInfo().DeclaredProperties.Where(x => IsInstanceProperty(x));
         }
 
         public static PropertyInfo GetDeclaredProperty(this Type type, string propertyName)
@@ -139,7 +156,7 @@ namespace Simple.OData.Client.Extensions
 
         public static IEnumerable<FieldInfo> GetAllFields(this Type type)
         {
-            var fields = type.GetTypeInfo().DeclaredFields.ToList();
+            var fields = GetDeclaredFields(type).ToList();
 
             var baseType = type.GetTypeInfo().BaseType;
             if (baseType != null && baseType != typeof(object))
@@ -148,12 +165,12 @@ namespace Simple.OData.Client.Extensions
             return fields.ToArray();
         }
 
-        public static FieldInfo GetAnyField(this Type type, string fieldName)
+        public static FieldInfo GetAnyField(this Type type, string fieldName, bool includeNonPublic = false)
         {
             var currentType = type;
             while (currentType != null && currentType != typeof(object))
             {
-                var field = currentType.GetTypeInfo().GetDeclaredField(fieldName);
+                var field = currentType.GetDeclaredField(fieldName);
                 if (field != null)
                     return field;
 
@@ -164,7 +181,7 @@ namespace Simple.OData.Client.Extensions
 
         public static IEnumerable<FieldInfo> GetDeclaredFields(this Type type)
         {
-            return type.GetTypeInfo().DeclaredFields;
+            return type.GetTypeInfo().DeclaredFields.Where(x => !x.IsStatic);
         }
 
         public static FieldInfo GetDeclaredField(this Type type, string fieldName)
@@ -179,12 +196,12 @@ namespace Simple.OData.Client.Extensions
 
         public static IEnumerable<ConstructorInfo> GetDeclaredConstructors(this Type type)
         {
-            return type.GetTypeInfo().DeclaredConstructors;
+            return type.GetTypeInfo().DeclaredConstructors.Where(x => !x.IsStatic);
         }
 
         public static ConstructorInfo GetDefaultConstructor(this Type type)
         {
-            return type.GetTypeInfo().DeclaredConstructors.SingleOrDefault(x => x.GetParameters().Length == 0);
+            return GetDeclaredConstructors(type).SingleOrDefault(x => x.GetParameters().Length == 0);
         }
 
         public static TypeAttributes GetTypeAttributes(this Type type)
@@ -220,6 +237,11 @@ namespace Simple.OData.Client.Extensions
         public static bool IsEnumType(this Type type)
         {
             return type.GetTypeInfo().IsEnum;
+        }
+
+        public static Type GetBaseType(this Type type)
+        {
+            return type.GetTypeInfo().BaseType;
         }
 #endif
     }

@@ -33,14 +33,14 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
-        public async Task UpdateByKeyResetSchemaCache()
+        public async Task UpdateByKeyClearMetadataCache()
         {
             var product = await _client
                 .For("Products")
                 .Set(new { ProductName = "Test1", UnitPrice = 18m })
                 .InsertEntryAsync();
 
-            (_client as ODataClient).Session.ResetMetadataCache();
+            (_client as ODataClient).Session.ClearMetadataCache();
             await _client
                 .For("Products")
                 .Key(product["ProductID"])
@@ -279,6 +279,25 @@ namespace Simple.OData.Client.Tests
                 .Expand("Products")
                 .FindEntryAsync();
             Assert.Equal(2, (category["Products"] as IEnumerable<object>).Count());
+        }
+
+        [Fact]
+        public async Task UpdateDerived()
+        {
+            var ship = await _client
+                .For("Transport")
+                .As("Ship")
+                .Set(new { ShipName = "Test1" })
+                .InsertEntryAsync();
+
+            ship = await _client
+                .For("Transport")
+                .As("Ship")
+                .Key(ship["TransportID"])
+                .Set(new { ShipName = "Test2" })
+                .UpdateEntryAsync();
+
+            Assert.Equal("Test2", ship["ShipName"]);
         }
     }
 }

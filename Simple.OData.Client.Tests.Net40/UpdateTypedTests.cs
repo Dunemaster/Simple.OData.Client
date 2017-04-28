@@ -278,5 +278,57 @@ namespace Simple.OData.Client.Tests
                 .FindEntryAsync();
             Assert.Equal(2, category.Products.Count());
         }
+
+        [Fact]
+        public async Task UpdateProducttWithoutExpandingCategory()
+        {
+            var category = await _client
+                .For<Category>()
+                .Set(new { CategoryName = "Test5" })
+                .InsertEntryAsync();
+            await _client
+                .For<Product>()
+                .Set(new { ProductName = "Test6", UnitPrice = 18m, CategoryID = category.CategoryID })
+                .InsertEntryAsync();
+
+            var product = await _client
+                .For<ProductWithNoCategoryLink>("Products")
+                .Filter(x => x.ProductName == "Test6")
+                .FindEntryAsync();
+
+            product.ProductName = "Test7";
+
+            await _client
+                .For<ProductWithNoCategoryLink>("Products")
+                .Key(product.ProductID)
+                .Set(product)
+                .UpdateEntryAsync();
+
+            product = await _client
+                .For<ProductWithNoCategoryLink>("Products")
+                .Key(product.ProductID)
+                .FindEntryAsync();
+            Assert.Equal("Test7", product.ProductName);
+            Assert.NotNull(product.CategoryID);
+        }
+
+        [Fact]
+        public async Task UpdateDerived()
+        {
+            var ship = await _client
+                .For<Transport>()
+                .As<Ship>()
+                .Set(new Ship { ShipName = "Test1" })
+                .InsertEntryAsync();
+
+            ship = await _client
+                .For<Transport>()
+                .As<Ship>()
+                .Key(ship.TransportID)
+                .Set(new { ShipName = "Test2" })
+                .UpdateEntryAsync();
+
+            Assert.Equal("Test2", ship.ShipName);
+        }
     }
 }

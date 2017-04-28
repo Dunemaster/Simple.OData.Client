@@ -11,10 +11,10 @@ namespace Simple.OData.Client.V3.Adapter
         private readonly IEdmModel _source;
         private readonly EdmEntityType _entityType;
 
-        public EdmDeltaModel(IEdmModel source, IEdmEntityType entityType, IEnumerable<string> propertyNames)
+        public EdmDeltaModel(IEdmModel source, IEdmEntityType entityType, ICollection<string> propertyNames)
         {
             _source = source;
-            _entityType = new EdmEntityType(entityType.Namespace, entityType.Name);
+            _entityType = new EdmEntityType(entityType.Namespace, entityType.Name, null, entityType.IsAbstract, entityType.IsOpen);
 
             foreach (var property in entityType.StructuralProperties())
             {
@@ -32,8 +32,20 @@ namespace Simple.OData.Client.V3.Adapter
                         DependentProperties = property.DependentProperties,
                         Name = property.Name,
                         OnDelete = property.OnDelete,
-                        Target = property.Partner.DeclaringEntityType(),
-                        TargetMultiplicity = property.Partner.Multiplicity()
+                        Target = property.Partner != null
+                            ? property.Partner.DeclaringEntityType()
+                            : property.Type.TypeKind() == EdmTypeKind.Collection
+                            ? (property.Type.Definition as IEdmCollectionType).ElementType.Definition as IEdmEntityType
+                            : property.Type.TypeKind() == EdmTypeKind.Entity
+                            ? property.Type.Definition as IEdmEntityType
+                            : null,
+                        TargetMultiplicity = property.Partner != null 
+                            ? property.Partner.Multiplicity() 
+                            : property.Type.TypeKind() == EdmTypeKind.Collection
+                            ? EdmMultiplicity.Many
+                            : property.Type.TypeKind() == EdmTypeKind.Entity
+                            ? EdmMultiplicity.ZeroOrOne
+                            : EdmMultiplicity.Unknown,
                     };
                     _entityType.AddUnidirectionalNavigation(navInfo);
                 }

@@ -1,8 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,18 +9,31 @@ namespace Simple.OData.Client
     /// <summary>
     /// Performs batch processing of OData requests by grouping multiple operations in a single HTTP POST request in accordance with OData protocol
     /// </summary>
-    public class ODataBatch : IDisposable
+    public class ODataBatch
     {
-        internal ODataClientSettings Settings { get; set; }
-        internal RequestBuilder RequestBuilder { get; set; }
-        internal RequestRunner RequestRunner { get; set; }
+        private readonly ODataClient _client;
+        private readonly List<Func<IODataClient, Task>> _actions = new List<Func<IODataClient, Task>>();
+        private readonly SimpleDictionary<object, IDictionary<string, object>> _entryMap = new SimpleDictionary<object, IDictionary<string, object>>(); 
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ODataBatch"/> class.
         /// </summary>
         /// <param name="urlBase">The URL base.</param>
+        /// <remarks>
+        /// This constructor overload is obsolete. Use <see cref="ODataBatch(Uri)"/> constructor overload./>
+        /// </remarks>
+        [Obsolete("This constructor overload is obsolete. Use ODataBatch(Uri baseUri) constructor.")]
         public ODataBatch(string urlBase)
-            : this (new ODataClientSettings { UrlBase = urlBase })
+            : this(new ODataClientSettings { UrlBase = urlBase })
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ODataBatch"/> class.
+        /// </summary>
+        /// <param name="baseUri">The URL base.</param>
+        public ODataBatch(Uri baseUri)
+            : this(new ODataClientSettings { BaseUri = baseUri })
         {
         }
 
@@ -32,68 +43,57 @@ namespace Simple.OData.Client
         /// <param name="settings">The settings.</param>
         public ODataBatch(ODataClientSettings settings)
         {
-            var session = Session.FromSettings(settings);
-            this.Settings = settings;
-            this.RequestBuilder = new RequestBuilder(session, true);
-            this.RequestRunner = new RequestRunner(session);
+            _client = new ODataClient(settings, _entryMap);
         }
 
         /// <summary>
-        /// Cancels pending OData batch and releases all resources used by <see cref="ODataBatch"/>.
+        /// Initializes a new instance of the <see cref="ODataBatch"/> class.
         /// </summary>
-        public void Dispose()
+        /// <param name="client">The OData client which settings will be used to create a batch.</param>
+        public ODataBatch(IODataClient client) : this(client, false) { }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ODataBatch"/> class.
+        /// </summary>
+        /// <param name="client">The OData client which will be used to create a batch.</param>
+        /// <param name="reuseSession">Flag indicating that the existing session from the <see cref="ODataClient"/>
+        /// should be used rather than creating a new one.
+        /// </param>
+        public ODataBatch(IODataClient client, bool reuseSession)
         {
+            _client = reuseSession
+                ? new ODataClient((client as ODataClient), _entryMap) 
+                : new ODataClient((client as ODataClient).Session.Settings, _entryMap);
+        }
+        /// <summary>
+        /// Adds an OData command to an OData batch.
+        /// </summary>
+        /// <param name="batch">The OData batch.</param>
+        /// <param name="action">The command to add to the batch.</param>
+        /// <returns></returns>
+        public static ODataBatch operator +(ODataBatch batch, Func<IODataClient, Task> action)
+        {
+            batch._actions.Add(action);
+            return batch;
         }
 
         /// <summary>
-        /// Completes the OData batch by submitting pending requests to the OData service.
+        /// Executes the OData batch by submitting pending requests to the OData service.
         /// </summary>
         /// <returns></returns>
-        public Task CompleteAsync()
+        public Task ExecuteAsync()
         {
-            return CompleteAsync(CancellationToken.None);
+            return ExecuteAsync(CancellationToken.None);
         }
 
         /// <summary>
-        /// Completes the OData batch by submitting pending requests to the OData service.
+        /// Executes the OData batch by submitting pending requests to the OData service.
         /// </summary>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns></returns>
-        public async Task CompleteAsync(CancellationToken cancellationToken)
+        public Task ExecuteAsync(CancellationToken cancellationToken)
         {
-            using (var response = await this.RequestRunner.ExecuteRequestAsync(
-                await this.RequestBuilder.CreateBatchRequestAsync(), cancellationToken))
-            {
-                await ParseResponseAsync(response);
-            }
-        }
-
-        /// <summary>
-        /// Cancels the pending OData batch.
-        /// </summary>
-        public void Cancel()
-        {
-        }
-
-        private async Task ParseResponseAsync(HttpResponseMessage response)
-        {
-            var content = await response.Content.ReadAsStringAsync();
-            var batchMarker = Regex.Match(content, @"--batchresponse_[a-zA-Z0-9\-]+").Value;
-            var batchResponse = content.Split(new string[] {batchMarker}, StringSplitOptions.None)[1];
-            var changesetMarker = Regex.Match(batchResponse, @"--changesetresponse_[a-zA-Z0-9\-]+").Value;
-            var changesetResponses =
-                batchResponse.Split(new string[] {changesetMarker}, StringSplitOptions.None).ToList();
-            changesetResponses = changesetResponses.Skip(1).Take(changesetResponses.Count - 2).ToList();
-            foreach (var changesetResponse in changesetResponses)
-            {
-                var match = Regex.Match(changesetResponse, @"HTTP/[0-9\.]+\s+([0-9]+)\s+(.+)\n");
-                var statusCode = int.Parse(match.Groups[1].Value);
-                var message = match.Groups[2].Value;
-                if (statusCode >= 400)
-                {
-                    throw new WebRequestException(message, (HttpStatusCode)statusCode);
-                }
-            }
+            return _client.ExecuteBatchAsync(_actions, cancellationToken);
         }
     }
 }

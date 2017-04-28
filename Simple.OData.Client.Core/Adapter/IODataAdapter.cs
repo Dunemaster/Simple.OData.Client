@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 
+#pragma warning disable 1591
+
 namespace Simple.OData.Client
 {
     public interface IODataAdapter
@@ -11,12 +13,11 @@ namespace Simple.OData.Client
         object Model { get; set; }
 
         string GetODataVersionString();
-        string ConvertValueToUriLiteral(object value);
-        string ConvertKeyToUriLiteral(IDictionary<string, object> key);
 
         IMetadata GetMetadata();
+        ICommandFormatter GetCommandFormatter();
         IResponseReader GetResponseReader();
         IRequestWriter GetRequestWriter(Lazy<IBatchWriter> deferredBatchWriter);
-        IBatchWriter GetBatchWriter();
+        IBatchWriter GetBatchWriter(IDictionary<object, IDictionary<string, object>> batchEntries);
     }
 }

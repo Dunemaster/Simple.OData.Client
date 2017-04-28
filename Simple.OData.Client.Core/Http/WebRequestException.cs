@@ -1,19 +1,34 @@
 using System;
 using System.Net;
+using System.Net.Http;
 using System.Runtime.Serialization;
+using System.Threading.Tasks;
 
 namespace Simple.OData.Client
 {
-#if NET40
-    [Serializable]
-#endif
     /// <summary>
     /// The exception that is thrown when the service failed to process the Web request
     /// </summary>
+#if NET40
+    [Serializable]
+#endif
     public class WebRequestException : Exception
     {
-        private readonly HttpStatusCode _code;
-        private readonly string _response;
+        private readonly HttpStatusCode _statusCode;
+        private readonly string _responseContent;
+        private readonly Uri _requestUri;
+
+        /// <summary>
+        /// Creates from the instance of HttpResponseMessage.
+        /// </summary>
+        /// <param name="response">The instance of <see cref="HttpResponseMessage"/>.</param>
+        /// <returns>The instance of <see cref="WebRequestException"/>.</returns>
+        public static async Task<WebRequestException> CreateFromResponseMessageAsync(HttpResponseMessage response)
+        {
+            var requestUri = response.RequestMessage != null ? response.RequestMessage.RequestUri : null;
+            return new WebRequestException(response.ReasonPhrase, response.StatusCode, requestUri,
+                response.Content != null ? await response.Content.ReadAsStringAsync().ConfigureAwait(false) : null, null);
+        }
 
         /// <summary>
         /// Creates from the instance of WebException.
@@ -25,74 +40,50 @@ namespace Simple.OData.Client
             var response = ex.Response as HttpWebResponse;
             return response == null ?
                 new WebRequestException(ex) :
-                new WebRequestException(ex.Message, response, ex);
+                new WebRequestException(ex.Message, response.StatusCode, response.ResponseUri, Utils.StreamToString(response.GetResponseStream()), ex);
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="WebRequestException"/> class.
+        /// Creates from the instance of HttpResponseMessage.
         /// </summary>
-        /// <param name="message">The message that describes the error.</param>
-        public WebRequestException(string message)
-            : base(message)
+        /// <param name="statusCode">The HTTP status code.</param>
+        /// <returns>The instance of <see cref="WebRequestException"/>.</returns>
+        public static WebRequestException CreateFromStatusCode(HttpStatusCode statusCode, string responseContent = null)
         {
+            return new WebRequestException(statusCode.ToString(), statusCode, null, responseContent, null);
         }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebRequestException"/> class.
         /// </summary>
         /// <param name="message">The message that describes the error.</param>
-        /// <param name="code">The <see cref="HttpStatusCode"/>.</param>
-        public WebRequestException(string message, HttpStatusCode code)
-            : base(message)
-        {
-            _code = code;
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="WebRequestException"/> class.
-        /// </summary>
-        /// <param name="message">The message that describes the error.</param>
+        /// <param name="statusCode">The HTTP status code.</param>
+        /// <param name="requestUri">The original request URI.</param>
+        /// <param name="responseContent">The response content.</param>
         /// <param name="inner">The inner exception.</param>
-        public WebRequestException(string message, Exception inner)
+        private WebRequestException(string message, HttpStatusCode statusCode, Uri requestUri, string responseContent, Exception inner)
             : base(message, inner)
         {
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="WebRequestException"/> class.
-        /// </summary>
-        /// <param name="message">The message that describes the error.</param>
-        /// <param name="response">The <see cref="HttpWebResponse"/>.</param>
-        /// <param name="inner">The inner exception.</param>
-        public WebRequestException(string message, HttpWebResponse response, Exception inner)
-            : base(message, inner)
-        {
-            _code = response.StatusCode;
-            _response = Utils.StreamToString(response.GetResponseStream());
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="WebRequestException"/> class.
-        /// </summary>
-        /// <param name="message">The message that describes the error.</param>
-        /// <param name="code">The <see cref="HttpStatusCode"/>.</param>
-        /// <param name="inner">The inner exception.</param>
-        public WebRequestException(string message, HttpStatusCode code, Exception inner)
-            : base(message, inner)
-        {
-            _code = code;
+            _statusCode = statusCode;
+            _responseContent = responseContent;
+            _requestUri = requestUri;
         }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebRequestException"/> class.
         /// </summary>
         /// <param name="inner">The inner exception.</param>
-        public WebRequestException(WebException inner)
+        private WebRequestException(WebException inner)
             : base("Unexpected WebException encountered", inner)
         {
         }
 
 #if NET40
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WebRequestException"/> class.
+        /// </summary>
+        /// <param name="info">The exception serialization information.</param>
+        /// <param name="context">The exception serialization context.</param>
         protected WebRequestException(
             SerializationInfo info,
             StreamingContext context) : base(info, context)
@@ -108,7 +99,7 @@ namespace Simple.OData.Client
         /// </value>
         public HttpStatusCode Code
         {
-            get { return _code; }
+            get { return _statusCode; }
         }
 
         /// <summary>
@@ -119,7 +110,18 @@ namespace Simple.OData.Client
         /// </value>
         public string Response
         {
-            get { return _response; }
+            get { return _responseContent; }
+        }
+
+        /// <summary>
+        /// Gets the HTTP Uri
+        /// </summary>
+        /// <value>
+        /// The original request URI, or the resulting URI if a redirect took place.
+        /// </value>
+        public Uri RequestUri
+        {
+            get { return _requestUri; }
         }
     }
 }

@@ -8,6 +8,23 @@ using Entry = System.Collections.Generic.Dictionary<string, object>;
 
 namespace Simple.OData.Client.Tests
 {
+    public class Product
+    {
+        public int ProductID { get; set; }
+        public string ProductName { get; set; }
+        public int? CategoryID { get; set; }
+
+        public Category Category { get; set; }
+    }
+
+    public class Category
+    {
+        public int CategoryID { get; set; }
+        public string CategoryName { get; set; }
+
+        public Product[] Products { get; set; }
+    }
+
 #if ODATA_V3
     public class FindNorthwindTestsV2Atom : FindNorthwindTests
     {
@@ -160,23 +177,50 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
+        public async Task ExpandProductsOrderByCategoryName()
+        {
+            var product = (await _client
+                .For<Product>()
+                .Expand(x => x.Category)
+                .OrderBy(x => x.Category.CategoryName)
+                .Select(x => x.Category.CategoryName)
+                .FindEntriesAsync()).Last();
+            Assert.Equal("Condiments", product.Category.CategoryName);
+        }
+
+        [Fact]
+        public async Task ExpandCategoryOrderByProductName()
+        {
+            if (_serviceUri.AbsoluteUri == ODataV4ReadWriteUri)
+            {
+                var category = (await _client
+                    .For<Category>()
+                    .Expand(x => x.Products)
+                    .OrderBy(x => x.Products.Select(y => y.ProductName))
+                    .FindEntriesAsync()).Last();
+                Assert.Equal("Röd Kaviar", category.Products.Last().ProductName);
+            }
+        }
+
+        [Fact]
         public async Task Count()
         {
             var count = await _client
                 .For("Products")
                 .Count()
-                .FindScalarAsync();
-            Assert.Equal(77, int.Parse(count.ToString()));
+                .FindScalarAsync<int>();
+            Assert.Equal(77, count);
         }
 
         [Fact]
         public async Task TotalCount()
         {
-            var productsWithCount = await _client
+            var annotations = new ODataFeedAnnotations();
+            var products = await _client
                 .For("Products")
-                .FindEntriesWithCountAsync(true);
-            Assert.Equal(77, productsWithCount.Item2);
-            Assert.Equal(20, productsWithCount.Item1.Count());
+                .FindEntriesAsync(annotations);
+            Assert.Equal(77, annotations.Count);
+            Assert.Equal(20, products.Count());
         }
 
         [Fact]

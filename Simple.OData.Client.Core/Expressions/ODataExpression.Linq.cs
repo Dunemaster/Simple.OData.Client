@@ -50,6 +50,13 @@ namespace Simple.OData.Client
                 case ExpressionType.Modulo:
                     return ParseBinaryExpression(expression);
 
+                case ExpressionType.TypeIs:
+                    return ParseTypeIsExpression(expression);
+                case ExpressionType.TypeAs:
+                    return ParseTypeAsExpression(expression);
+                case ExpressionType.Parameter:
+                    return ParseTypedParameterExpression(expression);
+
                 case ExpressionType.New:
                     return ParseNewExpression(expression);
             }
@@ -66,19 +73,18 @@ namespace Simple.OData.Client
             }
             else
             {
-                var memberName = memberExpression.Member.Name;
+                var memberName = memberExpression.Member.GetMappedName();
                 memberNames = memberNames == null ? memberName : string.Join(".", memberName, memberNames);
                 switch (memberExpression.Expression.NodeType)
                 {
                     case ExpressionType.Parameter:
-                        return new ODataExpression(memberName);
+                        return FromReference(memberNames);
                     case ExpressionType.Constant:
                         return ParseConstantExpression(memberExpression.Expression, memberNames);
                     case ExpressionType.MemberAccess:
                         if (FunctionMapping.ContainsFunction(memberName, 0))
                         {
-                            var contextExpression = memberExpression.Expression as MemberExpression;
-                            return FromFunction(memberName, contextExpression.Member.Name, new List<object>());
+                            return FromFunction(memberName, ParseMemberExpression(memberExpression.Expression), new List<object>());
                         }
                         else
                         {
@@ -99,8 +105,10 @@ namespace Simple.OData.Client
                 var target = callExpression.Arguments.FirstOrDefault();
                 if (target != null)
                 {
-                    return FromFunction(callExpression.Method.Name, ParseLinqExpression(target).Reference,
-                        callExpression.Arguments.Skip(1).Select(x => ParseConstantExpression(x)));
+                    var callArguments = string.Equals(callExpression.Method.DeclaringType.FullName, "System.Convert", StringComparison.Ordinal)
+                        ? callExpression.Arguments
+                        : callExpression.Arguments.Skip(1);
+                    return FromFunction(callExpression.Method.Name, ParseLinqExpression(target), callArguments);
                 }
                 else
                 {
@@ -109,11 +117,29 @@ namespace Simple.OData.Client
             }
             else
             {
-                var memberExpression = Utils.CastExpressionWithTypeCheck<MemberExpression>(callExpression.Object);
-                var arguments = new List<object>();
-                arguments.AddRange(callExpression.Arguments.Select(ParseCallArgumentExpression));
+                switch (callExpression.Object.NodeType)
+                {
+                    case ExpressionType.MemberAccess:
+                        var memberExpression = callExpression.Object as MemberExpression;
+                        var arguments = new List<object>();
+                        arguments.AddRange(callExpression.Arguments.Select(ParseCallArgumentExpression));
+                        return new ODataExpression(
+                            ParseMemberExpression(memberExpression), 
+                            new ExpressionFunction(callExpression.Method.Name, arguments));
 
-                return FromFunction(callExpression.Method.Name, memberExpression.Member.Name, arguments);
+                    case ExpressionType.Call:
+                        if (string.Equals(callExpression.Method.Name, "ToString", StringComparison.Ordinal))
+                            return ParseCallExpression(callExpression.Object);
+                        else
+                            return new ODataExpression(
+                                new ODataExpression(callExpression.Object), 
+                                new ExpressionFunction(callExpression.Method.Name, callExpression.Arguments));
+
+                    case ExpressionType.Constant:
+                        return new ODataExpression(ParseConstantExpression(callExpression.Object).Value);
+                }
+
+                throw Utils.NotSupportedExpression(callExpression.Object);
             }
         }
 
@@ -136,6 +162,8 @@ namespace Simple.OData.Client
                     return new ODataExpression(ParseMemberExpression(expression).Value);
                 case ExpressionType.ArrayIndex:
                     return new ODataExpression(ParseArrayExpression(expression).Value);
+                case ExpressionType.Convert:
+                    return new ODataExpression(ParseUnaryExpression(expression));
 
                 default:
                     throw Utils.NotSupportedExpression(expression);
@@ -181,7 +209,7 @@ namespace Simple.OData.Client
                 case ExpressionType.Not:
                     return !odataExpression;
                 case ExpressionType.Convert:
-                    return odataExpression;
+                    return new ODataExpression(odataExpression, expression.Type);
                 case ExpressionType.Negate:
                     return -odataExpression;
             }
@@ -192,10 +220,26 @@ namespace Simple.OData.Client
         private static ODataExpression ParseBinaryExpression(Expression expression)
         {
             var binaryExpression = expression as BinaryExpression;
+
             var leftExpression = ParseLinqExpression(binaryExpression.Left);
             var rightExpression = ParseLinqExpression(binaryExpression.Right);
 
-            switch (expression.NodeType)
+            Type enumType;
+            if (IsConvertFromCustomEnum(binaryExpression.Left, out enumType))
+            {
+                return ParseBinaryExpression(leftExpression, ParseLinqExpression(Expression.Convert(binaryExpression.Right, enumType)), expression);
+            }
+            else if (IsConvertFromCustomEnum(binaryExpression.Right, out enumType))
+            {
+                return ParseBinaryExpression(ParseLinqExpression(Expression.Convert(binaryExpression.Left, enumType)), rightExpression, expression);
+            }
+
+            return ParseBinaryExpression(leftExpression, rightExpression, expression);
+        }
+
+        private static ODataExpression ParseBinaryExpression(ODataExpression leftExpression, ODataExpression rightExpression, Expression operandExpression)
+        {
+            switch (operandExpression.NodeType)
             {
                 case ExpressionType.Equal:
                     return leftExpression == rightExpression;
@@ -230,7 +274,48 @@ namespace Simple.OData.Client
                     return leftExpression % rightExpression;
             }
 
-            throw Utils.NotSupportedExpression(expression);
+            throw Utils.NotSupportedExpression(operandExpression);
+        }
+
+        private static bool IsConvertFromCustomEnum(Expression expression, out Type enumType)
+        {
+            enumType = null;
+            if (expression.NodeType == ExpressionType.Convert)
+            {
+                var unaryExpression = (expression as UnaryExpression).Operand;
+                enumType = unaryExpression.Type;
+                return enumType.IsEnumType() && !Utils.IsSystemType(enumType);
+            }
+            return false;
+        }
+
+        private static ODataExpression ParseTypeIsExpression(Expression expression)
+        {
+            var typeIsExpression = expression as TypeBinaryExpression;
+            var targetExpression = ParseLinqExpression(typeIsExpression.Expression);
+            return FromFunction(
+                new ExpressionFunction()
+                {
+                    FunctionName = "isof",
+                    Arguments = new List<ODataExpression>() { targetExpression, FromValue(typeIsExpression.TypeOperand) },
+                });
+        }
+
+        private static ODataExpression ParseTypeAsExpression(Expression expression)
+        {
+            var typeAsExpression = expression as UnaryExpression;
+            var targetExpression = ParseLinqExpression(typeAsExpression.Operand);
+            return FromFunction(
+                new ExpressionFunction()
+                {
+                    FunctionName = "cast",
+                    Arguments = new List<ODataExpression>() { targetExpression, FromValue(typeAsExpression.Type) },
+                });
+        }
+
+        private static ODataExpression ParseTypedParameterExpression(Expression expression)
+        {
+            return null;
         }
 
         private static ODataExpression ParseNewExpression(Expression expression)
@@ -275,7 +360,7 @@ namespace Simple.OData.Client
             }
             else
             {
-                var field = type.GetAnyField(memberName);
+                var field = type.GetAnyField(memberName, true);
                 if (field != null)
                 {
                     itemType = field.FieldType;

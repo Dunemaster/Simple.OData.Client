@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
@@ -32,6 +33,22 @@ namespace Simple.OData.Client.Tests
 
             Assert.True((int)product.ProductID > 0);
             Assert.Equal("Test1", product.ProductName);
+        }
+
+        [Fact]
+        public async Task InsertExpando()
+        {
+            var x = ODataDynamic.Expression;
+            dynamic expando = new ExpandoObject();
+            expando.ProductName = "Test9";
+            expando.UnitPrice = 18m;
+
+            var product = await _client
+                .For(x.Products)
+                .Set(expando)
+                .InsertEntryAsync();
+
+            Assert.True((int)product["ProductID"] > 0);
         }
 
         [Fact]
@@ -78,6 +95,19 @@ namespace Simple.OData.Client.Tests
                 .Filter(x.CategoryName == "Test5")
                 .FindEntryAsync();
             Assert.True((category.Products as IEnumerable<dynamic>).Count() == 1);
+        }
+
+        [Fact]
+        public async Task InsertShip()
+        {
+            var x = ODataDynamic.Expression;
+            var ship = await _client
+                .For(x.Transport)
+                .As(x.Ship)
+                .Set(x.ShipName = "Test1")
+                .InsertEntryAsync();
+
+            Assert.Equal("Test1", ship.ShipName);
         }
     }
 #endif

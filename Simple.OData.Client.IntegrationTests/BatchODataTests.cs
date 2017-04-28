@@ -47,13 +47,10 @@ namespace Simple.OData.Client.Tests
         [Fact]
         public async Task Success()
         {
-            using (var batch = new ODataBatch(_serviceUri))
-            {
-                var client = new ODataClient(batch);
-                await client.InsertEntryAsync("Products", CreateProduct(5001, "Test1"), false);
-                await client.InsertEntryAsync("Products", CreateProduct(5002, "Test2"), false);
-                await batch.CompleteAsync();
-            }
+            var batch = new ODataBatch(_serviceUri);
+            batch += x => x.InsertEntryAsync("Products", CreateProduct(5001, "Test1"), false);
+            batch += x => x.InsertEntryAsync("Products", CreateProduct(5002, "Test2"), false);
+            await batch.ExecuteAsync();
 
             var product = await _client.FindEntryAsync("Products?$filter=Name eq 'Test1'");
             Assert.NotNull(product);
@@ -65,26 +62,20 @@ namespace Simple.OData.Client.Tests
         //[Fact]
         //public async Task PartialFailures()
         //{
-        //    using (var batch = new ODataBatch(_serviceUri))
-        //    {
-        //        var client = new ODataClient(batch);
-        //        await client.InsertEntryAsync("Products", CreateProduct(5003, "Test3"), false);
-        //        await client.InsertEntryAsync("Products", CreateProduct(0, "Test4"), false);
-        //        await AssertThrowsAsync<WebRequestException>(async () => await batch.CompleteAsync());
-        //    }
+        //    var batch = new ODataBatch(_serviceUri);
+        //    batch += x => x.InsertEntryAsync("Products", CreateProduct(5003, "Test3"), false);
+        //    batch += x => x.InsertEntryAsync("Products", CreateProduct(0, "Test4"), false);
+        //    await AssertThrowsAsync<AggregateException>(async () => await batch.ExecuteAsync());
         //}
 
         // OData.org sample service doesn't fail on this request
         //[Fact]
         //public async Task AllFailures()
         //{
-        //    using (var batch = new ODataBatch(_serviceUri))
-        //    {
-        //        var client = new ODataClient(batch);
-        //        await client.InsertEntryAsync("Products", CreateProduct(0, "Test5"), false);
-        //        await client.InsertEntryAsync("Products", CreateProduct(0, "Test6"), false);
-        //        await AssertThrowsAsync<WebRequestException>(async () => await batch.CompleteAsync());
-        //    }
+        //    var batch = new ODataBatch(_serviceUri);
+        //    batch += x => x.InsertEntryAsync("Products", CreateProduct(0, "Test5"), false);
+        //    batch += x => x.InsertEntryAsync("Products", CreateProduct(0, "Test6"), false);
+        //    await AssertThrowsAsync<AggregateException>(async () => await batch.ExecuteAsync());
         //}
 
         [Fact]
@@ -92,14 +83,11 @@ namespace Simple.OData.Client.Tests
         {
             var key = new Entry() { { "Name", "Test11" } };
 
-            using (var batch = new ODataBatch(_serviceUri))
-            {
-                var client = new ODataClient(batch);
-                await client.InsertEntryAsync("Products", CreateProduct(5011, "Test11"), false);
-                await client.UpdateEntriesAsync("Products", "Products?$filter=Name eq 'Test11'", new Entry() { { "Price", 22m } });
-                await client.DeleteEntriesAsync("Products", "Products?$filter=Name eq 'Test11'");
-                await batch.CompleteAsync();
-            }
+            var batch = new ODataBatch(_serviceUri);
+            batch += x => x.InsertEntryAsync("Products", CreateProduct(5011, "Test11"), false);
+            batch += x => x.UpdateEntriesAsync("Products", "Products?$filter=Name eq 'Test11'", new Entry() { { "Price", 22m } });
+            batch += x => x.DeleteEntriesAsync("Products", "Products?$filter=Name eq 'Test11'");
+            await batch.ExecuteAsync();
 
             var product = await _client.FindEntryAsync("Products?$filter=Name eq 'Test11'");
             Assert.Equal(18d, Convert.ToDouble(product["Price"]));
@@ -109,31 +97,23 @@ namespace Simple.OData.Client.Tests
         //[Fact]
         //public async Task InsertUpdateDeleteSeparateBatches()
         //{
-        //    using (var batch = new ODataBatch(_serviceUri))
-        //    {
-        //        var client = new ODataClient(batch);
-        //        await client.InsertEntryAsync("Products", CreateProduct(5012, "Test12"), false);
-        //        await batch.CompleteAsync();
-        //    }
+        //    var batch = new ODataBatch(_serviceUri);
+        //    batch += x => x.InsertEntryAsync("Products", CreateProduct(5012, "Test12"), false);
+        //    await batch.ExecuteAsync();
+
         //    var product = await _client.FindEntryAsync("Products?$filter=Name eq 'Test12'");
         //    Assert.Equal(18d, Convert.ToDouble(product["Price"]));
         //    var key = new Entry() { { "ID", product["ID"] } };
 
-        //    using (var batch = new ODataBatch(_serviceUri))
-        //    {
-        //        var client = new ODataClient(batch);
-        //        await client.UpdateEntryAsync("Products", key, new Entry() { { "Price", 22m } });
-        //        await batch.CompleteAsync();
-        //    }
+        //    batch = new ODataBatch(_serviceUri);
+        //    batch += x => x.UpdateEntryAsync("Products", key, new Entry() { { "Price", 22m } });
+        //    await batch.ExecuteAsync();
         //    product = await _client.FindEntryAsync("Products?$filter=Name eq 'Test12'");
         //    Assert.Equal(22d, Convert.ToDouble(product["Price"]));
 
-        //    using (var batch = new ODataBatch(_serviceUri))
-        //    {
-        //        var client = new ODataClient(batch);
-        //        await client.DeleteEntryAsync("Products", key);
-        //        await batch.CompleteAsync();
-        //    }
+        //    batch = new ODataBatch(_serviceUri);
+        //    batch += x => x.DeleteEntryAsync("Products", key);
+        //    await batch.ExecuteAsync();
         //    product = await _client.FindEntryAsync("Products?$filter=Name eq 'Test12'");
         //    Assert.Null(product);
         //}
@@ -141,14 +121,11 @@ namespace Simple.OData.Client.Tests
         [Fact]
         public async Task InsertSingleEntityWithSingleAssociationSingleBatch()
         {
-            IDictionary<string, object> category;
-            using (var batch = new ODataBatch(_serviceUri))
-            {
-                var client = new ODataClient(batch);
-                category = await client.InsertEntryAsync("Categories", CreateCategory(5013, "Test13"));
-                await client.InsertEntryAsync("Products", CreateProduct(5014, "Test14", category), false);
-                await batch.CompleteAsync();
-            }
+            IDictionary<string, object> category = null;
+            var batch = new ODataBatch(_serviceUri);
+            batch += async x => category = await x.InsertEntryAsync("Categories", CreateCategory(5013, "Test13"));
+            batch += x => x.InsertEntryAsync("Products", CreateProduct(5014, "Test14", category), false);
+            await batch.ExecuteAsync();
 
             var product = await _client
                 .For("Products")
@@ -161,17 +138,67 @@ namespace Simple.OData.Client.Tests
         [Fact]
         public async Task InsertSingleEntityWithMultipleAssociationsSingleBatch()
         {
-            IDictionary<string, object> category;
-            using (var batch = new ODataBatch(_serviceUri))
-            {
-                var client = new ODataClient(batch);
-                var product1 = await client.InsertEntryAsync("Products", CreateProduct(5015, "Test15"));
-                var product2 = await client.InsertEntryAsync("Products", CreateProduct(5016, "Test16"));
-                await client.InsertEntryAsync("Categories", CreateCategory(5017, "Test17", new[] { product1, product2 } ), false);
-                await batch.CompleteAsync();
-            }
+            IDictionary<string, object> product1 = null;
+            IDictionary<string, object> product2 = null;
 
-            category = await _client
+            var batch = new ODataBatch(_serviceUri);
+            batch += async x => product1 = await x.InsertEntryAsync("Products", CreateProduct(5015, "Test15"));
+            batch += async x => product2 = await x.InsertEntryAsync("Products", CreateProduct(5016, "Test16"));
+            batch += async x => await x.InsertEntryAsync("Categories", CreateCategory(5017, "Test17", new[] { product1, product2 }), false);
+            await batch.ExecuteAsync();
+
+            var category = await _client
+                .For("Categories")
+                .Key(5017)
+                .Expand("Products")
+                .FindEntryAsync();
+            Assert.Equal(2, (category["Products"] as IEnumerable<object>).Count());
+        }
+
+        [Fact]
+        public async Task ExecuteXCsrfFetchPriorToBatchExecution()
+        {
+            IDictionary<string, object> product1 = null;
+            IDictionary<string, object> product2 = null;
+
+            // None of the existing sample service endpoints actually provide an xcsrf token, 
+            // but in scenarios where a developer may need to use a csrf token, this is an 
+            // example of how to acquire one and send it in on subsequent batch requests.
+            var token = "";
+            var settings = new ODataClientSettings(_serviceUri);
+            settings.BeforeRequest += (request) =>
+            {
+                request.Headers.Add("x-csrf-token", "fetch");
+            };
+            settings.AfterResponse += (response) =>
+            {
+                // Assuming that because the service end points don't return tokens at this time
+                // that we won't be setting the value of the token here.
+                IEnumerable<string> values;
+                token = response.Headers.TryGetValues("x-csrf-token", out values) ? values.First() : "myToken";
+            };
+
+            // Execute an arbitrary request to retrieve the csrf token
+            var client = new ODataClient(settings);
+            await client.GetMetadataDocumentAsync();
+
+            // Since the token was never updated it should still be an empty string.
+            Assert.NotNull(token);
+
+            // Change the settings for the client so we can re-use the session and create a new request with different headers 
+            var newHeaders = new Dictionary<string, IEnumerable<string>>
+            {
+                {"x-csrf-token", new List<string> {token}}
+            };
+            client.UpdateRequestHeaders(newHeaders);
+
+            var batch = new ODataBatch(client, reuseSession: true);
+            batch += async x => product1 = await x.InsertEntryAsync("Products", CreateProduct(5015, "Test15"));
+            batch += async x => product2 = await x.InsertEntryAsync("Products", CreateProduct(5016, "Test16"));
+            batch += async x => await x.InsertEntryAsync("Categories", CreateCategory(5017, "Test17", new[] { product1, product2 }), false);
+            await batch.ExecuteAsync();
+
+            var category = await _client
                 .For("Categories")
                 .Key(5017)
                 .Expand("Products")

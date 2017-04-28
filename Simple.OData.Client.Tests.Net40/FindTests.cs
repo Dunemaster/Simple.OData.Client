@@ -10,6 +10,11 @@ namespace Simple.OData.Client.Tests
 {
     public class FindTests : TestBase
     {
+        public FindTests()
+            : base(true)
+        {
+        }
+
         [Fact]
         public async Task Filter()
         {
@@ -56,7 +61,7 @@ namespace Simple.OData.Client.Tests
                 .For("Products")
                 .Skip(1)
                 .FindEntriesAsync();
-            Assert.Equal(76, products.Count());
+            Assert.Equal(ExpectedCountOfProducts-1, products.Count());
         }
 
         [Fact]
@@ -101,6 +106,17 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
+        public async Task OrderByExpanded()
+        {
+            var product = (await _client
+                .For("Products")
+                .Expand("Category")
+                .OrderBy("Category/CategoryName")
+                .FindEntriesAsync()).Last();
+            Assert.Equal("Seafood", (product["Category"] as IDictionary<string, object>)["CategoryName"]);
+        }
+
+        [Fact]
         public async Task SelectSingle()
         {
             var product = await _client
@@ -140,6 +156,7 @@ namespace Simple.OData.Client.Tests
                 .For("Products")
                 .Select("ProductID, ProductName")
                 .FindEntryAsync();
+            Assert.Equal(2, product.Count);
             Assert.Contains("ProductName", product.Keys);
             Assert.Contains("ProductID", product.Keys);
         }
@@ -163,7 +180,7 @@ namespace Simple.OData.Client.Tests
                 .Expand("Products")
                 .Filter("CategoryName eq 'Beverages'")
                 .FindEntryAsync();
-            Assert.Equal(12, (category["Products"] as IEnumerable<object>).Count());
+            Assert.Equal(ExpectedCountOfBeveragesProducts, (category["Products"] as IEnumerable<object>).Count());
         }
 
         [Fact]
@@ -174,19 +191,52 @@ namespace Simple.OData.Client.Tests
                 .OrderBy("ProductID")
                 .Expand("Category/Products")
                 .FindEntriesAsync()).Last();
-            Assert.Equal(12, ((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>).Count());
+            Assert.Equal(ExpectedCountOfCondimentsProducts, ((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>).Count());
         }
 
         [Fact]
-        public async Task ExpandODataOrg()
+        public async Task ExpandMultipleLevelsWithCollection()
         {
-            var client = new ODataClient("http://services.odata.org/V3/OData/OData.svc/");
-            IEnumerable<object> productDetails = await client
-                .For("Product")
-                .Expand("ProductDetails")
-                .Filter("ID eq 0")
-                .FindEntriesAsync();
-            Assert.NotEqual(0, productDetails.Count());
+            var product = (await _client
+                .For("Products")
+                .OrderBy("ProductID")
+                .Expand("Category/Products/Category")
+                .FindEntriesAsync()).Last();
+            Assert.Equal("Condiments", ((((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>)
+                                        .First() as IDictionary<string, object>)["Category"] as IDictionary<string, object>)["CategoryName"]);
+        }
+
+        [Fact]
+        public async Task ExpandMultipleLevelsWithCollectionAndSelect()
+        {
+            var product = (await _client
+                .For("Products")
+                .OrderBy("ProductID")
+                .Expand("Category/Products/Category")
+                .Select(new[] { "Category/Products/Category/CategoryName" })
+                .FindEntriesAsync()).Last();
+            Assert.Equal(1, product.Count);
+            Assert.Equal(1, (product["Category"] as IDictionary<string, object>).Count);
+            Assert.Equal(1, (((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>)
+                                        .First() as IDictionary<string, object>).Count);
+            Assert.Equal(1, ((((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>)
+                                        .First() as IDictionary<string, object>)["Category"] as IDictionary<string, object>).Count);
+            Assert.Equal("Condiments", ((((product["Category"] as IDictionary<string, object>)["Products"] as IEnumerable<object>)
+                                        .First() as IDictionary<string, object>)["Category"] as IDictionary<string, object>)["CategoryName"]);
+        }
+
+        [Fact]
+        public async Task ExpandWithSelect()
+        {
+            var product = (await _client
+                .For("Products")
+                .OrderBy("ProductID")
+                .Expand("Category/Products")
+                .Select(new[] {"ProductName", "Category/CategoryName" })
+                .FindEntriesAsync()).Last();
+            Assert.Equal(2, product.Count);
+            Assert.Equal(1, (product["Category"] as IDictionary<string, object>).Count);
+            Assert.Equal("Condiments", (product["Category"] as IDictionary<string, object>)["CategoryName"]);
         }
 
         [Fact]
@@ -195,8 +245,8 @@ namespace Simple.OData.Client.Tests
             var count = await _client
                 .For("Products")
                 .Count()
-                .FindScalarAsync();
-            Assert.Equal(77, int.Parse(count.ToString()));
+                .FindScalarAsync<int>();
+            Assert.Equal(ExpectedCountOfProducts, count);
         }
 
         [Fact]
@@ -206,18 +256,19 @@ namespace Simple.OData.Client.Tests
                 .For("Products")
                 .Filter("ProductName eq 'Chai'")
                 .Count()
-                .FindScalarAsync();
-            Assert.Equal(1, int.Parse(count.ToString()));
+                .FindScalarAsync<int>();
+            Assert.Equal(1, count);
         }
 
         [Fact]
         public async Task TotalCount()
         {
-            var productsWithCount = await _client
+            var annotations = new ODataFeedAnnotations();
+            var products = await _client
                 .For("Products")
-                .FindEntriesWithCountAsync(true);
-            Assert.Equal(77, productsWithCount.Item2);
-            Assert.Equal(77, productsWithCount.Item1.Count());
+                .FindEntriesAsync(annotations);
+            Assert.Equal(ExpectedCountOfProducts, annotations.Count);
+            Assert.Equal(ExpectedCountOfProducts, products.Count());
         }
 
         [Fact]
@@ -267,7 +318,7 @@ namespace Simple.OData.Client.Tests
                 .Key(2)
                 .NavigateTo("Products")
                 .FindEntriesAsync();
-            Assert.Equal(12, products.Count());
+            Assert.Equal(ExpectedCountOfCondimentsProducts, products.Count());
         }
 
         [Fact]
@@ -303,23 +354,23 @@ namespace Simple.OData.Client.Tests
                 .For("Transport")
                 .FindEntriesAsync();
             Assert.Equal(2, transport.Count());
-            Assert.False(transport.Any(x => x.ContainsKey(FluentCommand.ResourceTypeLiteral)));
+            Assert.False(transport.Any(x => x.ContainsKey(FluentCommand.AnnotationsLiteral)));
         }
 
         [Fact]
-        public async Task BaseClassEntriesWithResourceTypes()
+        public async Task BaseClassEntriesWithAnnotations()
         {
             var clientSettings = new ODataClientSettings
                                      {
-                                         UrlBase = _serviceUri,
-                                         IncludeResourceTypeInEntryProperties = true,
+                                         BaseUri = _serviceUri,
+                                         IncludeAnnotationsInResults = true,
                                      };
             var client = new ODataClient(clientSettings);
             var transport = await client
                 .For("Transport")
                 .FindEntriesAsync();
             Assert.Equal(2, transport.Count());
-            Assert.True(transport.All(x => x.ContainsKey(FluentCommand.ResourceTypeLiteral)));
+            Assert.True(transport.All(x => x.ContainsKey(FluentCommand.AnnotationsLiteral)));
         }
 
         [Fact]
@@ -333,12 +384,12 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
-        public async Task AllDerivedClassEntriesWithResourceTypes()
+        public async Task AllDerivedClassEntriesWithAnnotations()
         {
             var clientSettings = new ODataClientSettings
             {
-                UrlBase = _serviceUri,
-                IncludeResourceTypeInEntryProperties = true,
+                BaseUri = _serviceUri,
+                IncludeAnnotationsInResults = true,
             };
             var client = new ODataClient(clientSettings);
             var transport = await client
@@ -346,7 +397,7 @@ namespace Simple.OData.Client.Tests
                 .As("Ships")
                 .FindEntriesAsync();
             Assert.Equal("Titanic", transport.Single()["ShipName"]);
-            Assert.Equal("Ships", transport.Single()[FluentCommand.ResourceTypeLiteral]);
+            Assert.Equal("NorthwindModel.Ship", (transport.Single()[FluentCommand.AnnotationsLiteral] as ODataEntryAnnotations).TypeName);
         }
 
         [Fact]
@@ -361,6 +412,27 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
+        public async Task BaseClassEntryByKey()
+        {
+            var transport = await _client
+                .For("Transport")
+                .Key(1)
+                .FindEntryAsync();
+            Assert.Equal("Titanic", transport["ShipName"]);
+        }
+
+        [Fact]
+        public async Task DerivedClassEntryByKey()
+        {
+            var transport = await _client
+                .For("Transport")
+                .As("Ships")
+                .Key(1)
+                .FindEntryAsync();
+            Assert.Equal("Titanic", transport["ShipName"]);
+        }
+
+        [Fact]
         public async Task DerivedClassEntryBaseAndDerivedFields()
         {
             var transport = await _client
@@ -369,6 +441,76 @@ namespace Simple.OData.Client.Tests
                 .Filter("TransportID eq 1 and ShipName eq 'Titanic'")
                 .FindEntryAsync();
             Assert.Equal("Titanic", transport["ShipName"]);
+        }
+
+        [Fact]
+        public async Task IsOfDerivedClassEntry()
+        {
+            var transport = await _client
+                .For("Transport")
+                .Filter("isof('NorthwindModel.Ship')")
+                .FindEntryAsync();
+            Assert.Equal("Titanic", transport["ShipName"]);
+        }
+
+        [Fact]
+        public async Task IsOfAssociation()
+        {
+            var employee = await _client
+                .For("Employees")
+                .Filter("isof(Superior, 'NorthwindModel.Employee')")
+                .FindEntryAsync();
+            Assert.NotNull(employee);
+        }
+
+        [Fact]
+        public async Task CastToPrimitiveType()
+        {
+            var product = await _client
+                .For("Products")
+                .Filter("ProductID eq cast(1L, 'Edm.Int32')")
+                .FindEntryAsync();
+            Assert.NotNull(product);
+        }
+
+        [Fact]
+        public async Task CastInstanceToEntityType()
+        {
+            var employee = await _client
+                .For("Employees")
+                .Filter("cast('NorthwindModel.Employee') ne null")
+                .FindEntryAsync();
+            Assert.NotNull(employee);
+        }
+
+        [Fact]
+        public async Task CastPropertyToEntityType()
+        {
+            var employee = await _client
+                .For("Employees")
+                .Filter("cast(Superior, 'NorthwindModel.Employee') ne null")
+                .FindEntryAsync();
+            Assert.NotNull(employee);
+        }
+
+        [Fact]
+        public async Task FilterAny()
+        {
+            var products = await _client
+                .For("Orders")
+                .Filter("Order_Details/any(d:d/Quantity gt 50)")
+                .FindEntriesAsync();
+            Assert.Equal(ExpectedCountOfOrdersHavingAnyDetail, products.Count());
+        }
+
+        [Fact]
+        public async Task FilterAll()
+        {
+            var products = await _client
+                .For("Orders")
+                .Filter("Order_Details/all(d:d/Quantity gt 50)")
+                .FindEntriesAsync();
+            Assert.Equal(ExpectedCountOfOrdersHavingAllDetails, products.Count());
         }
     }
 }

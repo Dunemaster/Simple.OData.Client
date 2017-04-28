@@ -21,7 +21,7 @@ namespace Simple.OData.Client.Tests
 
         protected const string TripPinV4ReadWriteUri = "http://services.odata.org/V4/TripPinServiceRW/";
 
-        protected readonly string _serviceUri;
+        protected readonly Uri _serviceUri;
         protected readonly ODataPayloadFormat _payloadFormat;
         protected readonly IODataClient _client;
 
@@ -32,7 +32,7 @@ namespace Simple.OData.Client.Tests
                 serviceUri = GetReadWriteUri(serviceUri).Result;
             }
 
-            _serviceUri = serviceUri;
+            _serviceUri = new Uri(serviceUri);
             _payloadFormat = payloadFormat;
             _client = CreateClientWithDefaultSettings();
         }
@@ -53,7 +53,12 @@ namespace Simple.OData.Client.Tests
 
         protected IODataClient CreateClientWithDefaultSettings()
         {
-            return new ODataClient(new ODataClientSettings(_serviceUri) {PayloadFormat = _payloadFormat});
+            return new ODataClient(new ODataClientSettings(_serviceUri)
+            {
+                PayloadFormat = _payloadFormat,
+                IgnoreResourceNotFoundException = true,
+                OnTrace = (x, y) => Console.WriteLine(string.Format(x, y)),
+            });
         }
 
         public void Dispose()

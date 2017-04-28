@@ -1,7 +1,11 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+
+#pragma warning disable 1591
 
 namespace Simple.OData.Client
 {
@@ -14,47 +18,83 @@ namespace Simple.OData.Client
             _session = session;
         }
 
-        public abstract Task<ODataResponse> GetResponseAsync(HttpResponseMessage responseMessage, bool includeResourceTypeInEntryProperties = false);
+        public abstract Task<ODataResponse> GetResponseAsync(HttpResponseMessage responseMessage);
 
-        protected abstract void ConvertEntry(ResponseNode entryNode, object entry, bool includeResourceTypeInEntryProperties);
+        public async Task AssignBatchActionResultsAsync(IODataClient client,
+            ODataResponse batchResponse, IList<Func<IODataClient, Task>> actions, IList<int> responseIndexes)
+        {
+            var exceptions = new List<Exception>();
+            for (var actionIndex = 0; actionIndex < actions.Count && !exceptions.Any(); actionIndex++)
+            {
+                var responseIndex = responseIndexes[actionIndex];
+                if (responseIndex >= 0 && responseIndex < batchResponse.Batch.Count)
+                {
+                    var actionResponse = batchResponse.Batch[responseIndex];
+                    if (actionResponse.Exception != null)
+                    {
+                        exceptions.Add(actionResponse.Exception);
+                    }
+                    else if (actionResponse.StatusCode >= (int)HttpStatusCode.BadRequest)
+                    {
+                        exceptions.Add(WebRequestException.CreateFromStatusCode((HttpStatusCode)actionResponse.StatusCode));
+                    }
+                    else
+                    {
+                        await actions[actionIndex](new ODataClient(client as ODataClient, actionResponse)).ConfigureAwait(false);
+                    }
+                }
+            }
 
-        protected void StartFeed(Stack<ResponseNode> nodeStack, long? feedItemCount)
+            if (exceptions.Any())
+            {
+                throw exceptions.First();
+            }
+        }
+
+        protected abstract void ConvertEntry(ResponseNode entryNode, object entry);
+
+        protected void StartFeed(Stack<ResponseNode> nodeStack, ODataFeedAnnotations feedAnnotations)
         {
             nodeStack.Push(new ResponseNode
             {
-                Feed = new List<IDictionary<string, object>>(),
-                TotalCount = feedItemCount,
+                Feed = new AnnotatedFeed(new List<AnnotatedEntry>()),
             });
         }
 
-        protected void EndFeed(Stack<ResponseNode> nodeStack, ref ResponseNode rootNode)
+        protected void EndFeed(Stack<ResponseNode> nodeStack, ODataFeedAnnotations feedAnnotations, ref ResponseNode rootNode)
         {
             var feedNode = nodeStack.Pop();
-            var entries = feedNode.Feed;
             if (nodeStack.Any())
-                nodeStack.Peek().Feed = entries;
+                nodeStack.Peek().Feed = feedNode.Feed;
             else
                 rootNode = feedNode;
+            
+            feedNode.Feed.SetAnnotations(feedAnnotations);            
         }
 
         protected void StartEntry(Stack<ResponseNode> nodeStack)
         {
             nodeStack.Push(new ResponseNode
             {
-                Entry = new Dictionary<string, object>()
+                Entry = new AnnotatedEntry(new Dictionary<string, object>())
             });
         }
 
-        protected void EndEntry(Stack<ResponseNode> nodeStack, ref ResponseNode rootNode, object entry, bool includeResourceTypeInEntryProperties)
+        protected void EndEntry(Stack<ResponseNode> nodeStack, ref ResponseNode rootNode, object entry)
         {
             var entryNode = nodeStack.Pop();
-            ConvertEntry(entryNode, entry, includeResourceTypeInEntryProperties);
+            ConvertEntry(entryNode, entry);
             if (nodeStack.Any())
             {
-                if (nodeStack.Peek().Feed != null)
-                    nodeStack.Peek().Feed.Add(entryNode.Entry);
+                var node = nodeStack.Peek();
+                if (node.Feed != null)
+                {
+                    node.Feed.Entries.Add(entryNode.Entry);
+                }
                 else
-                    nodeStack.Peek().Entry = entryNode.Entry;
+                {
+                    node.Entry = entryNode.Entry;
+                }
             }
             else
             {
@@ -78,8 +118,10 @@ namespace Simple.OData.Client
                 var linkValue = linkNode.Value;
                 if (linkNode.Value is IDictionary<string, object> && !(linkNode.Value as IDictionary<string, object>).Any())
                     linkValue = null;
-                nodeStack.Peek().Entry.Add(linkNode.LinkName, linkValue);
+                nodeStack.Peek().Entry.Data.Add(linkNode.LinkName, linkValue);
             }
+            if (linkNode.Feed != null && linkNode.Feed.Annotations != null)
+                nodeStack.Peek().Entry.SetLinkAnnotations(linkNode.Feed.Annotations);
         }
     }
 }

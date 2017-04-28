@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,19 +17,30 @@ namespace Simple.OData.Client
         /// </summary>
         /// <param name="collectionName">Name of the collection.</param>
         /// <returns>The fluent OData client instance.</returns>
-        IFluentClient<IDictionary<string, object>> For(string collectionName);
+        IBoundClient<IDictionary<string, object>> For(string collectionName);
         /// <summary>
         /// Returns an instance of a fluent OData client for the specified collection.
         /// </summary>
         /// <param name="expression">Collection expression.</param>
         /// <returns>The fluent OData client instance.</returns>
-        IFluentClient<ODataEntry> For(ODataExpression expression);
+        IBoundClient<ODataEntry> For(ODataExpression expression);
         /// <summary>
         /// Returns an instance of a fluent OData client for the specified collection.
         /// </summary>
         /// <param name="collectionName">Name of the collection.</param>
         /// <returns>The fluent OData client instance.</returns>
-        IFluentClient<T> For<T>(string collectionName = null) where T : class;
+        IBoundClient<T> For<T>(string collectionName = null) where T : class;
+
+        /// <summary>
+        /// Returns an instance of a fluent OData client for unbound operations (functions and actions).
+        /// </summary>
+        /// <returns>The fluent OData client instance.</returns>
+        IUnboundClient<object> Unbound();
+        /// <summary>
+        /// Returns an instance of a fluent OData client for unbound operations (functions and actions).
+        /// </summary>
+        /// <returns>The fluent OData client instance.</returns>
+        IUnboundClient<T> Unbound<T>() where T : class;
 
         /// <summary>
         /// Gets the OData service metadata.
@@ -62,13 +74,27 @@ namespace Simple.OData.Client
         /// Gets the OData service metadata as string.
         /// </summary>
         /// <returns>The service metadata string.</returns>
+        [Obsolete("This method is obsolete. Use GetMetadataDocumentAsync instead.")]
         Task<string> GetMetadataAsStringAsync();
         /// <summary>
         /// Gets the OData service metadata as string.
         /// </summary>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>The service metadata string.</returns>
+        [Obsolete("This method is obsolete. Use GetMetadataDocumentAsync instead.")]
         Task<string> GetMetadataAsStringAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Gets the OData service metadata as string.
+        /// </summary>
+        /// <returns>The service metadata string.</returns>
+        Task<string> GetMetadataDocumentAsync();
+        /// <summary>
+        /// Gets the OData service metadata as string.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The service metadata string.</returns>
+        Task<string> GetMetadataDocumentAsync(CancellationToken cancellationToken);
 
         /// <summary>
         /// Gets the OData command text.
@@ -131,35 +157,21 @@ namespace Simple.OData.Client
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>Entries found.</returns>
         Task<IEnumerable<IDictionary<string, object>>> FindEntriesAsync(string commandText, bool scalarResult, CancellationToken cancellationToken);
-
         /// <summary>
-        /// Retrieves entries with result count by executing OData GET request.
+        /// Retrieves entries by executing OData GET request and assigns OData feed annotations.
         /// </summary>
         /// <param name="commandText">The OData command text.</param>
+        /// <param name="annotations">The OData feed annotations.</param>
         /// <returns>Entries found with entry count.</returns>
-        Task<Tuple<IEnumerable<IDictionary<string, object>>, int>> FindEntriesWithCountAsync(string commandText);
+        Task<IEnumerable<IDictionary<string, object>>> FindEntriesAsync(string commandText, ODataFeedAnnotations annotations);
         /// <summary>
-        /// Retrieves entries with result count by executing OData GET request.
+        /// Retrieves entries by executing OData GET request and assigns OData feed annotations.
         /// </summary>
         /// <param name="commandText">The OData command text.</param>
+        /// <param name="annotations">The OData feed annotations.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>Entries found with entry count.</returns>
-        Task<Tuple<IEnumerable<IDictionary<string, object>>, int>> FindEntriesWithCountAsync(string commandText, CancellationToken cancellationToken);
-        /// <summary>
-        /// Retrieves entries with result count by executing OData GET request.
-        /// </summary>
-        /// <param name="commandText">The OData command text.</param>
-        /// <param name="scalarResult">if set to <c>true</c> the result is expected to be of a scalar type.</param>
-        /// <returns>Entries found with entry count.</returns>
-        Task<Tuple<IEnumerable<IDictionary<string, object>>, int>> FindEntriesWithCountAsync(string commandText, bool scalarResult);
-        /// <summary>
-        /// Retrieves entries with result count by executing OData GET request.
-        /// </summary>
-        /// <param name="commandText">The OData command text.</param>
-        /// <param name="scalarResult">if set to <c>true</c> the result is expected to be of a scalar type.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>Entries found with entry count.</returns>
-        Task<Tuple<IEnumerable<IDictionary<string, object>>, int>> FindEntriesWithCountAsync(string commandText, bool scalarResult, CancellationToken cancellationToken);
+        Task<IEnumerable<IDictionary<string, object>>> FindEntriesAsync(string commandText, ODataFeedAnnotations annotations, CancellationToken cancellationToken);
 
         /// <summary>
         /// Retrieves an entry by executing OData GET request.
@@ -417,12 +429,46 @@ namespace Simple.OData.Client
         Task UnlinkEntryAsync(string collection, IDictionary<string, object> entryKey, string linkName, IDictionary<string, object> linkedEntryKey, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Retrieves a media entry stream by executing OData GET request.
+        /// </summary>
+        /// <param name="commandText">The OData command text.</param>
+        /// <returns>The media stream.</returns>
+        Task<Stream> GetMediaStreamAsync(string commandText);
+        /// <summary>
+        /// Retrieves a media entry stream by executing OData GET request.
+        /// </summary>
+        /// <param name="commandText">The OData command text.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The media stream.</returns>
+        Task<Stream> GetMediaStreamAsync(string commandText, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Assigns a stream to a media entry by executing OData PUT request.
+        /// </summary>
+        /// <param name="commandText">The OData command text.</param>
+        /// <param name="stream">The media stream.</param>
+        /// <param name="contentType">The media content type.</param>
+        /// <param name="optimisticConcurrency">if set to <c>true</c> sets the resource ETag in the updated request header.</param>
+        /// <returns>Task instance.</returns>
+        Task SetMediaStreamAsync(string commandText, Stream stream, string contentType, bool optimisticConcurrency);
+        /// <summary>
+        /// Assigns a stream to a media entry by executing OData PUT request.
+        /// </summary>
+        /// <param name="commandText">The OData command text.</param>
+        /// <param name="stream">The media stream.</param>
+        /// <param name="contentType">The media content type.</param>
+        /// <param name="optimisticConcurrency">if set to <c>true</c> sets the resource ETag in the updated request header.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Task instance.</returns>
+        Task SetMediaStreamAsync(string commandText, Stream stream, string contentType, bool optimisticConcurrency, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Executes the OData function.
         /// </summary>
         /// <param name="functionName">Name of the function.</param>
         /// <param name="parameters">The function parameters.</param>
         /// <returns>Function execution result.</returns>
-        Task<IEnumerable<IDictionary<string, object>>> ExecuteFunctionAsync(string functionName, IDictionary<string, object> parameters);
+        Task<IDictionary<string, object>> ExecuteFunctionAsSingleAsync(string functionName, IDictionary<string, object> parameters);
         /// <summary>
         /// Executes the OData function.
         /// </summary>
@@ -430,7 +476,23 @@ namespace Simple.OData.Client
         /// <param name="parameters">The function parameters.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>Function execution result.</returns>
-        Task<IEnumerable<IDictionary<string, object>>> ExecuteFunctionAsync(string functionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+        Task<IDictionary<string, object>> ExecuteFunctionAsSingleAsync(string functionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData function.
+        /// </summary>
+        /// <param name="functionName">Name of the function.</param>
+        /// <param name="parameters">The function parameters.</param>
+        /// <returns>Function execution result.</returns>
+        Task<IEnumerable<IDictionary<string, object>>> ExecuteFunctionAsEnumerableAsync(string functionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData function.
+        /// </summary>
+        /// <param name="functionName">Name of the function.</param>
+        /// <param name="parameters">The function parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Function execution result.</returns>
+        Task<IEnumerable<IDictionary<string, object>>> ExecuteFunctionAsEnumerableAsync(string functionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
 
         /// <summary>
         /// Executes the OData function and returns scalar result.
@@ -467,6 +529,90 @@ namespace Simple.OData.Client
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>Function execution result.</returns>
         Task<T[]> ExecuteFunctionAsArrayAsync<T>(string functionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <returns>Action execution result.</returns>
+        Task ExecuteActionAsync(string actionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Action execution result.</returns>
+        Task ExecuteActionAsync(string actionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <returns>Action execution result.</returns>
+        Task<IDictionary<string, object>> ExecuteActionAsSingleAsync(string actionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Action execution result.</returns>
+        Task<IDictionary<string, object>> ExecuteActionAsSingleAsync(string actionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <returns>Action execution result.</returns>
+        Task<IEnumerable<IDictionary<string, object>>> ExecuteActionAsEnumerableAsync(string actionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData action.
+        /// </summary>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Action execution result.</returns>
+        Task<IEnumerable<IDictionary<string, object>>> ExecuteActionAsEnumerableAsync(string actionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData action and returns scalar result.
+        /// </summary>
+        /// <typeparam name="T">The result type.</typeparam>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The parameters.</param>
+        /// <returns>action execution result.</returns>
+        Task<T> ExecuteActionAsScalarAsync<T>(string actionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData action and returns scalar result.
+        /// </summary>
+        /// <typeparam name="T">The result type.</typeparam>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Action execution result.</returns>
+        Task<T> ExecuteActionAsScalarAsync<T>(string actionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes the OData action and returns an array.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <returns>Action execution result.</returns>
+        Task<T[]> ExecuteActionAsArrayAsync<T>(string actionName, IDictionary<string, object> parameters);
+        /// <summary>
+        /// Executes the OData action and returns an array.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="actionName">Name of the action.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Action execution result.</returns>
+        Task<T[]> ExecuteActionAsArrayAsync<T>(string actionName, IDictionary<string, object> parameters, CancellationToken cancellationToken);
 
         /// <summary>
         /// Sets the word pluralizer used when resolving metadata objects.

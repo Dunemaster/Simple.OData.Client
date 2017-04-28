@@ -16,346 +16,532 @@ namespace Simple.OData.Client
     // For the same reason FluentClient is also declared as public
     // More: http://bloggingabout.net/blogs/vagif/archive/2013/08/05/we-need-better-interoperability-between-dynamic-and-statically-compiled-c.aspx
 
-    public class FluentCommand
+    public partial class FluentCommand
     {
-        private readonly Session _session;
-        private readonly FluentCommand _parent;
-        private string _collectionName;
-        private ODataExpression _collectionExpression;
-        private string _derivedCollectionName;
-        private ODataExpression _derivedCollectionExpression;
-        private string _functionName;
-        private IList<object> _keyValues;
-        private IDictionary<string, object> _namedKeyValues;
-        private IDictionary<string, object> _entryData;
-        private Dictionary<string, object> _parameters = new Dictionary<string, object>();
-        private string _filter;
-        private ODataExpression _filterExpression;
-        private int _skipCount = -1;
-        private int _topCount = -1;
-        private List<string> _expandAssociations = new List<string>();
-        private List<string> _selectColumns = new List<string>();
-        private readonly List<KeyValuePair<string, bool>> _orderbyColumns = new List<KeyValuePair<string, bool>>();
-        private bool _computeCount;
-        private bool _includeCount;
-        private string _linkName;
-        private ODataExpression _linkExpression;
+        private readonly CommandDetails _details;
 
         internal static readonly string ResultLiteral = "__result";
-        internal static readonly string ResourceTypeLiteral = "__resourcetype";
+        internal static readonly string AnnotationsLiteral = "__annotations";
+        internal static readonly string MediaEntityLiteral = "__entity";
 
-        internal FluentCommand(Session session, FluentCommand parent)
+        internal FluentCommand(Session session, FluentCommand parent, SimpleDictionary<object, IDictionary<string, object>> batchEntries)
         {
-            _session = session;
-            _parent = parent;
+            _details = new CommandDetails(session, parent, batchEntries);
         }
 
         internal FluentCommand(FluentCommand ancestor)
         {
-            _session = ancestor._session;
-            _parent = ancestor._parent;
-            _collectionName = ancestor._collectionName;
-            _collectionExpression = ancestor._collectionExpression;
-            _derivedCollectionName = ancestor._derivedCollectionName;
-            _derivedCollectionExpression = ancestor._derivedCollectionExpression;
-            _functionName = ancestor._functionName;
-            _keyValues = ancestor._keyValues;
-            _namedKeyValues = ancestor._namedKeyValues;
-            _entryData = ancestor._entryData;
-            _parameters = ancestor._parameters;
-            _filter = ancestor._filter;
-            _filterExpression = ancestor._filterExpression;
-            _filterExpression = ancestor._filterExpression;
-            _skipCount = ancestor._skipCount;
-            _topCount = ancestor._topCount;
-            _expandAssociations = ancestor._expandAssociations;
-            _selectColumns = ancestor._selectColumns;
-            _orderbyColumns = ancestor._orderbyColumns;
-            _computeCount = ancestor._computeCount;
-            _includeCount = ancestor._includeCount;
-            _linkName = ancestor._linkName;
-            _linkExpression = ancestor._linkExpression;
+            _details = new CommandDetails(ancestor._details);
         }
 
-        private FluentCommand Resolve()
+        private bool IsBatchResponse { get { return _details.Session == null; } }
+
+        internal CommandDetails Details { get { return _details; } }
+
+        internal FluentCommand Resolve()
         {
-            if (!ReferenceEquals(_collectionExpression, null))
+            if (!ReferenceEquals(_details.CollectionExpression, null))
             {
-                For(_collectionExpression.AsString(_session));
-                _collectionExpression = null;
+                For(_details.CollectionExpression.AsString(_details.Session));
+                _details.CollectionExpression = null;
             }
 
-            if (!ReferenceEquals(_derivedCollectionExpression, null))
+            if (!ReferenceEquals(_details.DerivedCollectionExpression, null))
             {
-                As(_derivedCollectionExpression.AsString(_session));
-                _derivedCollectionExpression = null;
+                As(_details.DerivedCollectionExpression.AsString(_details.Session));
+                _details.DerivedCollectionExpression = null;
             }
 
-            if (!ReferenceEquals(_filterExpression, null))
+            if (!ReferenceEquals(_details.FilterExpression, null))
             {
-                _namedKeyValues = TryInterpretFilterExpressionAsKey(_filterExpression);
-                if (_namedKeyValues == null)
+                _details.NamedKeyValues = TryInterpretFilterExpressionAsKey(_details.FilterExpression);
+                if (_details.NamedKeyValues == null)
                 {
-                    _filter = _filterExpression.Format(_session, this.EntityCollection);
+                    _details.Filter = _details.FilterExpression.Format(
+                        new ExpressionContext(_details.Session, this.EntityCollection, null, this.DynamicPropertiesContainerName));
                 }
                 else
                 {
-                    _keyValues = null;
-                    _topCount = -1;
+                    _details.KeyValues = null;
+                    _details.TopCount = -1;
                 }
-                _filterExpression = null;
+                if (_details.FilterExpression.HasTypeConstraint(_details.DerivedCollectionName))
+                {
+                    _details.DerivedCollectionName = null;
+                }
+                _details.FilterExpression = null;
             }
 
-            if (!ReferenceEquals(_linkExpression, null))
+            if (!ReferenceEquals(_details.LinkExpression, null))
             {
-                Link(_linkExpression.AsString(_session));
-                _linkExpression = null;
+                Link(_details.LinkExpression.AsString(_details.Session));
+                _details.LinkExpression = null;
             }
 
             return this;
         }
 
-        private EntityCollection EntityCollection
+        internal EntityCollection EntityCollection
         {
             get
             {
-                if (!string.IsNullOrEmpty(_collectionName))
+                if (string.IsNullOrEmpty(_details.CollectionName) && string.IsNullOrEmpty(_details.LinkName))
+                    return null;
+
+                EntityCollection entityCollection;
+                if (!string.IsNullOrEmpty(_details.LinkName))
                 {
-                    var entityCollection = _session.Metadata.GetEntityCollection(_collectionName);
-                    return string.IsNullOrEmpty(_derivedCollectionName)
-                               ? entityCollection
-                               : _session.Metadata.GetDerivedEntityCollection(entityCollection, _derivedCollectionName);
-                }
-                else if (!string.IsNullOrEmpty(_linkName))
-                {
-                    var parent = new FluentCommand(_parent).Resolve();
-                    return _session.Metadata.GetEntityCollection(_session.Metadata
-                        .GetNavigationPropertyPartnerName(parent.EntityCollection.ActualName, _linkName));
+                    var parent = new FluentCommand(_details.Parent).Resolve();
+                    var collectionName = _details.Session.Metadata.GetNavigationPropertyPartnerTypeName(
+                        parent.EntityCollection.Name, _details.LinkName);
+                    entityCollection = _details.Session.Metadata.GetEntityCollection(collectionName);
                 }
                 else
                 {
-                    return null;
+                    entityCollection = _details.Session.Metadata.GetEntityCollection(_details.CollectionName);
                 }
+
+                return string.IsNullOrEmpty(_details.DerivedCollectionName)
+                    ? entityCollection
+                    : _details.Session.Metadata.GetDerivedEntityCollection(entityCollection, _details.DerivedCollectionName);
             }
         }
 
-        public async Task<string> GetCommandTextAsync()
+        public string QualifiedEntityCollectionName
         {
-            await _session.ResolveAdapterAsync(CancellationToken.None);
-            return new FluentCommand(this).Resolve().Format();
+            get
+            {
+                var entityCollection = new FluentCommand(this).Resolve().EntityCollection;
+                return entityCollection.BaseEntityCollection == null
+                    ? entityCollection.Name
+                    : string.Format("{0}/{1}",
+                        entityCollection.BaseEntityCollection.Name,
+                        _details.Session.Metadata.GetQualifiedTypeName(entityCollection.Name));
+            }
+        }
+
+        public string DynamicPropertiesContainerName
+        {
+            get { return _details.DynamicPropertiesContainerName; }
+        }
+
+        public Task<string> GetCommandTextAsync()
+        {
+            return GetCommandTextAsync(CancellationToken.None);
         }
 
         public async Task<string> GetCommandTextAsync(CancellationToken cancellationToken)
         {
-            await _session.ResolveAdapterAsync(cancellationToken);
+            await _details.Session.ResolveAdapterAsync(cancellationToken).ConfigureAwait(false);
             return new FluentCommand(this).Resolve().Format();
         }
 
-        public void For(string collectionName)
+        public FluentCommand For(string collectionName)
         {
+            if (IsBatchResponse) return this;
+
             var items = collectionName.Split('/');
             if (items.Count() > 1)
             {
-                _collectionName = items[0];
-                _derivedCollectionName = items[1];
+                _details.CollectionName = items[0];
+                _details.DerivedCollectionName = items[1];
             }
             else
             {
-                _collectionName = collectionName;
+                _details.CollectionName = collectionName;
             }
+            return this;
         }
 
-        public void For(ODataExpression expression)
+        public FluentCommand WithProperties(string propertyName)
         {
-            _collectionExpression = expression;
+            if (IsBatchResponse) return this;
+
+            _details.DynamicPropertiesContainerName = propertyName;
+            return this;
         }
 
-        public void As(string derivedCollectionName)
+        public FluentCommand WithMedia(IEnumerable<string> properties)
         {
-            _derivedCollectionName = derivedCollectionName;
+            if (IsBatchResponse) return this;
+
+            _details.MediaProperties = properties;
+            return this;
         }
 
-        public void As(ODataExpression expression)
+        public FluentCommand WithMedia(params string[] properties)
         {
-            _derivedCollectionExpression = expression;
+            if (IsBatchResponse) return this;
+
+            _details.MediaProperties = SplitItems(properties).ToList();
+            return this;
         }
 
-        public void Link(string linkName)
+        public FluentCommand WithMedia(params ODataExpression[] properties)
         {
-            _linkName = linkName;
+            return WithMedia(properties.Select(x => x.Reference));
         }
 
-        public void Link(ODataExpression expression)
+        public FluentCommand For(ODataExpression expression)
         {
-            _linkExpression = expression;
+            if (IsBatchResponse) return this;
+
+            _details.CollectionExpression = expression;
+            return this;
         }
 
-        public void Key(params object[] key)
+        public FluentCommand As(string derivedCollectionName)
         {
+            if (IsBatchResponse) return this;
+
+            _details.DerivedCollectionName = derivedCollectionName;
+            return this;
+        }
+
+        public FluentCommand As(ODataExpression expression)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.DerivedCollectionExpression = expression;
+            return this;
+        }
+
+        public FluentCommand Link(string linkName)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.LinkName = linkName;
+            return this;
+        }
+
+        public FluentCommand Link(ODataExpression expression)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.LinkExpression = expression;
+            return this;
+        }
+
+        public FluentCommand Key(params object[] key)
+        {
+            if (IsBatchResponse) return this;
+
             if (key != null && key.Length == 1 && IsAnonymousType(key.First().GetType()))
             {
                 var namedKeyValues = key.First();
-                _namedKeyValues = Utils.GetMappedProperties(namedKeyValues.GetType())
+                _details.NamedKeyValues = Utils.GetMappedProperties(namedKeyValues.GetType())
                     .Select(x => new KeyValuePair<string, object>(x.Name, x.GetValue(namedKeyValues, null))).ToIDictionary();
             }
             else
             {
-                _keyValues = key.ToList();
+                _details.KeyValues = key.ToList();
             }
+            return this;
         }
 
-        public void Key(IEnumerable<object> key)
+        public FluentCommand Key(IEnumerable<object> key)
         {
-            _keyValues = key.ToList();
-            _namedKeyValues = null;
+            if (IsBatchResponse) return this;
+
+            _details.KeyValues = key.ToList();
+            _details.NamedKeyValues = null;
+            return this;
         }
 
-        public void Key(IDictionary<string, object> key)
+        public FluentCommand Key(IDictionary<string, object> key)
         {
-            _namedKeyValues = key;
-            _keyValues = null;
+            if (IsBatchResponse) return this;
+
+            _details.NamedKeyValues = key;
+            _details.KeyValues = null;
+            return this;
         }
 
-        public void Filter(string filter)
+        public FluentCommand Filter(string filter)
         {
-            _filter = filter;
+            if (IsBatchResponse) return this;
+
+            if (string.IsNullOrEmpty(_details.Filter))
+                _details.Filter = filter;
+            else
+                _details.Filter = string.Format("({0}) and ({1})", _details.Filter, filter);
+            return this;
         }
 
-        public void Filter(ODataExpression expression)
+        public FluentCommand Filter(ODataExpression expression)
         {
-            _filterExpression = expression;
+            if (IsBatchResponse) return this;
+
+            if (ReferenceEquals(_details.FilterExpression, null))
+                _details.FilterExpression = expression;
+            else
+                _details.FilterExpression = _details.FilterExpression && expression;
+            return this;
         }
 
-        public void Skip(int count)
+        public FluentCommand Search(string search)
         {
-            _skipCount = count;
+            if (IsBatchResponse) return this;
+
+            _details.Search = search;
+            return this;
         }
 
-        public void Top(int count)
+        public FluentCommand Skip(long count)
         {
+            if (IsBatchResponse) return this;
+
+            _details.SkipCount = count;
+            return this;
+        }
+
+        public FluentCommand Top(long count)
+        {
+            if (IsBatchResponse) return this;
+
             if (!HasKey)
             {
-                _topCount = count;
+                _details.TopCount = count;
             }
             else if (count != 1)
             {
                 throw new InvalidOperationException("Top count may only be assigned to 1 when key is assigned");
             }
+            return this;
         }
 
-        public void Expand(IEnumerable<string> associations)
+        public FluentCommand Expand(ODataExpandOptions expandOptions)
         {
-            _expandAssociations = SplitItems(associations).ToList();
+            if (IsBatchResponse) return this;
+
+            _details.ExpandAssociations.AddRange(new[] { new KeyValuePair<string, ODataExpandOptions>("*", ODataExpandOptions.ByValue()) });
+            return this;
         }
 
-        public void Expand(params string[] associations)
+        public FluentCommand Expand(IEnumerable<string> associations)
         {
-            _expandAssociations = SplitItems(associations).ToList();
+            if (IsBatchResponse) return this;
+
+            _details.ExpandAssociations.AddRange(SplitItems(associations).Select(x => new KeyValuePair<string, ODataExpandOptions>(x, ODataExpandOptions.ByValue())));
+            return this;
         }
 
-        public void Expand(params ODataExpression[] columns)
+        public FluentCommand Expand(ODataExpandOptions expandOptions, IEnumerable<string> associations)
         {
-            Expand(columns.Select(x => x.Reference));
+            if (IsBatchResponse) return this;
+
+            _details.ExpandAssociations.AddRange(SplitItems(associations).Select(x => new KeyValuePair<string, ODataExpandOptions>(x, expandOptions)));
+            return this;
         }
 
-        public void Select(IEnumerable<string> columns)
+        public FluentCommand Expand(params string[] associations)
         {
-            _selectColumns = SplitItems(columns).ToList();
+            if (IsBatchResponse) return this;
+
+            _details.ExpandAssociations.AddRange(SplitItems(associations).Select(x => new KeyValuePair<string, ODataExpandOptions>(x, ODataExpandOptions.ByValue())));
+            return this;
         }
 
-        public void Select(params string[] columns)
+        public FluentCommand Expand(ODataExpandOptions expandOptions, params string[] associations)
         {
-            _selectColumns = SplitItems(columns).ToList();
+            if (IsBatchResponse) return this;
+
+            _details.ExpandAssociations.AddRange(SplitItems(associations).Select(x => new KeyValuePair<string, ODataExpandOptions>(x, expandOptions)));
+            return this;
         }
 
-        public void Select(params ODataExpression[] columns)
+        public FluentCommand Expand(params ODataExpression[] columns)
         {
-            Select(columns.Select(x => x.Reference));
+            return Expand(columns.Select(x => x.Reference));
         }
 
-        public void OrderBy(IEnumerable<KeyValuePair<string, bool>> columns)
+        public FluentCommand Expand(ODataExpandOptions expandOptions, params ODataExpression[] columns)
         {
-            _orderbyColumns.Clear();
-            _orderbyColumns.AddRange(SplitItems(columns));
+            return Expand(expandOptions, columns.Select(x => x.Reference));
         }
 
-        public void OrderBy(params string[] columns)
+        public FluentCommand Select(IEnumerable<string> columns)
         {
-            OrderBy(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, false)));
+            if (IsBatchResponse) return this;
+
+            _details.SelectColumns.AddRange(SplitItems(columns).ToList());
+            return this;
         }
 
-        public void OrderBy(params ODataExpression[] columns)
+        public FluentCommand Select(params string[] columns)
         {
-            OrderBy(columns.Select(x => new KeyValuePair<string, bool>(x.Reference, false)));
+            if (IsBatchResponse) return this;
+
+            _details.SelectColumns.AddRange(SplitItems(columns).ToList());
+            return this;
         }
 
-        public void ThenBy(params string[] columns)
+        public FluentCommand Select(params ODataExpression[] columns)
         {
-            _orderbyColumns.AddRange(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, false)));
+            return Select(columns.Select(x => x.Reference));
         }
 
-        public void ThenBy(params ODataExpression[] columns)
+        public FluentCommand OrderBy(IEnumerable<KeyValuePair<string, bool>> columns)
         {
-            ThenBy(columns.Select(x => x.Reference).ToArray());
+            if (IsBatchResponse) return this;
+
+            _details.OrderbyColumns.AddRange(SplitItems(columns));
+            return this;
         }
 
-        public void OrderByDescending(params string[] columns)
+        public FluentCommand OrderBy(params string[] columns)
         {
-            OrderBy(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, true)));
+            return OrderBy(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, false)));
         }
 
-        public void OrderByDescending(params ODataExpression[] columns)
+        public FluentCommand OrderBy(params ODataExpression[] columns)
         {
-            OrderBy(columns.Select(x => new KeyValuePair<string, bool>(x.Reference, true)));
+            return OrderBy(columns.Select(x => new KeyValuePair<string, bool>(x.Reference, false)));
         }
 
-        public void ThenByDescending(params string[] columns)
+        public FluentCommand ThenBy(params string[] columns)
         {
-            _orderbyColumns.AddRange(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, true)));
+            if (IsBatchResponse) return this;
+
+            _details.OrderbyColumns.AddRange(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, false)));
+            return this;
         }
 
-        public void ThenByDescending(params ODataExpression[] columns)
+        public FluentCommand ThenBy(params ODataExpression[] columns)
         {
-            ThenByDescending(columns.Select(x => x.Reference).ToArray());
+            return ThenBy(columns.Select(x => x.Reference).ToArray());
         }
 
-        public void Count()
+        public FluentCommand OrderByDescending(params string[] columns)
         {
-            _computeCount = true;
+            return OrderBy(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, true)));
         }
 
-        public void Set(object value)
+        public FluentCommand OrderByDescending(params ODataExpression[] columns)
         {
-            _entryData = Utils.GetMappedProperties(value.GetType())
+            return OrderBy(columns.Select(x => new KeyValuePair<string, bool>(x.Reference, true)));
+        }
+
+        public FluentCommand ThenByDescending(params string[] columns)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.OrderbyColumns.AddRange(SplitItems(columns).Select(x => new KeyValuePair<string, bool>(x, true)));
+            return this;
+        }
+
+        public FluentCommand ThenByDescending(params ODataExpression[] columns)
+        {
+            return ThenByDescending(columns.Select(x => x.Reference).ToArray());
+        }
+
+        public FluentCommand QueryOptions(string queryOptions)
+        {
+            if (IsBatchResponse) return this;
+
+            if (_details.QueryOptions == null)
+                _details.QueryOptions = queryOptions;
+            else
+                _details.QueryOptions = string.Format("{0}&{1}", _details.QueryOptions, queryOptions);
+            return this;
+        }
+
+        public FluentCommand QueryOptions(IDictionary<string, object> queryOptions)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.QueryOptionsKeyValues = queryOptions;
+            return this;
+        }
+
+        public FluentCommand QueryOptions(ODataExpression expression)
+        {
+            if (IsBatchResponse) return this;
+
+            if (ReferenceEquals(_details.QueryOptionsExpression, null))
+                _details.QueryOptionsExpression = expression;
+            else
+                _details.QueryOptionsExpression = _details.QueryOptionsExpression && expression;
+            return this;
+        }
+
+        public FluentCommand Media()
+        {
+            return Media(FluentCommand.MediaEntityLiteral);
+        }
+
+        public FluentCommand Media(string streamName)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.MediaName = streamName;
+            return this;
+        }
+
+        public FluentCommand Media(ODataExpression expression)
+        {
+            return Media(expression.Reference);
+        }
+
+        public FluentCommand Count()
+        {
+            if (IsBatchResponse) return this;
+
+            _details.ComputeCount = true;
+            return this;
+        }
+
+        public FluentCommand Set(object value)
+        {
+            if (IsBatchResponse) return this;
+
+            _details.EntryData = Utils.GetMappedProperties(value.GetType())
                 .Select(x => new KeyValuePair<string, object>(x.GetMappedName(), x.GetValue(value, null)))
                 .ToDictionary();
+            if (_details.BatchEntries != null)
+                _details.BatchEntries.GetOrAdd(value, _details.EntryData);
+            return this;
         }
 
-        public void Set(IDictionary<string, object> value)
+        public FluentCommand Set(IDictionary<string, object> value)
         {
-            _entryData = value;
+            if (IsBatchResponse) return this;
+
+            _details.EntryData = value;
+            return this;
         }
 
-        public void Set(params ODataExpression[] value)
+        public FluentCommand Set(params ODataExpression[] value)
         {
-            _entryData = value.Select(x => new KeyValuePair<string, object>(x.Reference, x.Value)).ToIDictionary();
+            if (IsBatchResponse) return this;
+
+            _details.EntryData = value.Select(x => new KeyValuePair<string, object>(x.Reference, x.Value)).ToIDictionary();
+            if (_details.BatchEntries != null)
+                _details.BatchEntries.GetOrAdd(value, _details.EntryData);
+            return this;
         }
 
-        public void Function(string functionName)
+        public FluentCommand Function(string functionName)
         {
-            _functionName = functionName;
+            if (IsBatchResponse) return this;
+
+            _details.FunctionName = functionName;
+            return this;
         }
 
-        public void Parameters(IDictionary<string, object> parameters)
+        public FluentCommand Action(string actionName)
         {
-            _parameters = parameters.ToDictionary();
+            if (IsBatchResponse) return this;
+
+            _details.ActionName = actionName;
+            return this;
         }
 
         public bool FilterIsKey
         {
             get
             {
-                return _namedKeyValues != null;
+                return _details.NamedKeyValues != null;
             }
         }
 
@@ -363,13 +549,15 @@ namespace Simple.OData.Client
         {
             get
             {
-                return _namedKeyValues;
+                return _details.NamedKeyValues;
             }
         }
 
         public FluentCommand WithCount()
         {
-            _includeCount = true;
+            if (IsBatchResponse) return this;
+
+            _details.IncludeCount = true;
             return this;
         }
 
@@ -378,19 +566,40 @@ namespace Simple.OData.Client
             return Format();
         }
 
-        internal string CollectionName
+        private string Format()
         {
-            get { return new FluentCommand(this).Resolve()._collectionName; }
+            return _details.Session.Adapter.GetCommandFormatter().FormatCommand(this);
         }
 
         internal bool HasKey
         {
-            get { return _keyValues != null && _keyValues.Count > 0 || _namedKeyValues != null && _namedKeyValues.Count > 0; }
+            get { return _details.KeyValues != null && _details.KeyValues.Count > 0 || _details.NamedKeyValues != null && _details.NamedKeyValues.Count > 0; }
         }
 
         internal bool HasFilter
         {
-            get { return !string.IsNullOrEmpty(_filter) || !ReferenceEquals(_filterExpression, null); }
+            get { return !string.IsNullOrEmpty(_details.Filter) || !ReferenceEquals(_details.FilterExpression, null); }
+        }
+
+        internal bool HasSearch
+        {
+            get { return !string.IsNullOrEmpty(_details.Search); }
+        }
+
+        public bool HasFunction
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(_details.FunctionName);
+            }
+        }
+
+        public bool HasAction
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(_details.ActionName);
+            }
         }
 
         internal IDictionary<string, object> KeyValues
@@ -400,19 +609,20 @@ namespace Simple.OData.Client
                 if (!HasKey)
                     return null;
 
-                var keyNames = _session.Metadata.GetDeclaredKeyPropertyNames(this.EntityCollection.ActualName).ToList();
+                var keyNames = _details.Session.Metadata.GetDeclaredKeyPropertyNames(this.EntityCollection.Name).ToList();
                 var namedKeyValues = new Dictionary<string, object>();
                 for (int index = 0; index < keyNames.Count; index++)
                 {
                     bool found = false;
                     object keyValue = null;
-                    if (_namedKeyValues != null && _namedKeyValues.Count > 0)
+                    if (_details.NamedKeyValues != null && _details.NamedKeyValues.Count > 0)
                     {
-                        found = _namedKeyValues.TryGetValue(keyNames[index], out keyValue);
+                        keyValue = _details.NamedKeyValues.FirstOrDefault(x => Utils.NamesMatch(x.Key, keyNames[index], _details.Session.Pluralizer)).Value;
+                        found = keyValue != null;
                     }
-                    else if (_keyValues != null && _keyValues.Count >= index)
+                    else if (_details.KeyValues != null && _details.KeyValues.Count >= index)
                     {
-                        keyValue = _keyValues[index];
+                        keyValue = _details.KeyValues[index];
                         found = true;
                     }
                     if (found)
@@ -427,105 +637,57 @@ namespace Simple.OData.Client
             }
         }
 
-        internal IDictionary<string, object> EntryData
+        internal IDictionary<string, object> CommandData
         {
-            get { return _entryData; }
+            get
+            {
+                if (_details.EntryData == null)
+                    return new Dictionary<string, object>();
+                if (string.IsNullOrEmpty(_details.DynamicPropertiesContainerName))
+                    return _details.EntryData;
+
+                var entryData = new Dictionary<string, object>();
+                foreach (var key in _details.EntryData.Keys.Where(x => 
+                    !string.Equals(x, _details.DynamicPropertiesContainerName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    entryData.Add(key, _details.EntryData[key]);
+                }
+                object dynamicProperties;
+                if (_details.EntryData.TryGetValue(_details.DynamicPropertiesContainerName, out dynamicProperties) && dynamicProperties != null)
+                {
+                    if (dynamicProperties is IDictionary<string, object>)
+                    {
+                        var kv = dynamicProperties as IDictionary<string, object>;
+                        foreach (var key in kv.Keys)
+                        {
+                            entryData.Add(key, kv[key]);
+                        }
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            string.Format("Property {0} must implement IDictionary<string,object> interface", 
+                            _details.DynamicPropertiesContainerName));
+                    }
+                }
+
+                return entryData;
+            }
         }
 
         internal IList<string> SelectedColumns
         {
-            get { return _selectColumns; }
+            get { return _details.SelectColumns; }
         }
 
-        private string Format()
+        internal string FunctionName
         {
-            string commandText = string.Empty;
-            if (!string.IsNullOrEmpty(_collectionName))
-            {
-                var entitySetName = _session.Metadata.GetEntityCollectionExactName(_collectionName);
-                var entityTypeNamespace = _session.Metadata.GetEntityCollectionTypeNamespace(_collectionName);
-                commandText += entitySetName;
-                if (!string.IsNullOrEmpty(_derivedCollectionName))
-                    commandText += "/" + string.Join(".",
-                        entityTypeNamespace,
-                        _session.Metadata.GetEntityTypeExactName(_derivedCollectionName));
-            }
-            else if (!string.IsNullOrEmpty(_linkName))
-            {
-                var parent = new FluentCommand(_parent).Resolve();
-                commandText += parent.Format() + "/";
-                commandText += _session.Metadata.GetNavigationPropertyExactName(parent.EntityCollection.ActualName, _linkName);
-            }
-            else if (!string.IsNullOrEmpty(_functionName))
-            {
-                commandText += _session.Metadata.GetFunctionExactName(_functionName);
-            }
-
-            if (HasKey && HasFilter)
-                throw new InvalidOperationException("Filter may not be set when key is assigned");
-
-            if (HasKey)
-                commandText += _session.Adapter.ConvertKeyToUriLiteral(this.KeyValues);
-
-            commandText += FormatClauses();
-
-            return commandText;
+            get { return _details.FunctionName; }
         }
 
-        private string FormatClauses()
+        internal string ActionName
         {
-            var text = string.Empty;
-            var extraClauses = new List<string>();
-            var aggregateClauses = new List<string>();
-
-            if (_parameters.Any())
-                extraClauses.Add(string.Join("&", _parameters.Select(x => string.Format("{0}={1}",
-                    x.Key, _session.Adapter.ConvertValueToUriLiteral(x.Value)))));
-
-            if (_filter != null)
-                extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Filter, Uri.EscapeDataString(_filter)));
-
-            if (_skipCount >= 0)
-                extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Skip, _skipCount));
-
-            if (_topCount >= 0)
-                extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Top, _topCount));
-
-            if (_expandAssociations.Any())
-            {
-                if (_session.Adapter.AdapterVersion == AdapterVersion.V3)
-                    extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Expand, 
-                        string.Join(",", _expandAssociations.Select(x => FormatExpandItem(x, this.EntityCollection)))));
-                else
-                    extraClauses.Add(string.Join(",", _expandAssociations.Select(x => FormatExpandItem(x, this.EntityCollection))));
-            }
-
-            if (_orderbyColumns.Any())
-                extraClauses.Add(string.Format("{0}={1}", ODataLiteral.OrderBy, 
-                    string.Join(",", _orderbyColumns.Select(FormatOrderByItem))));
-
-            if (_selectColumns.Any())
-                extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Select, 
-                    string.Join(",", _selectColumns.Select(FormatSelectItem))));
-
-            if (_includeCount)
-            {
-                if (_session.Adapter.AdapterVersion == AdapterVersion.V3)
-                    extraClauses.Add(string.Format("{0}={1}", ODataLiteral.InlineCount, ODataLiteral.AllPages));
-                else
-                    extraClauses.Add(string.Format("{0}={1}", ODataLiteral.Count, ODataLiteral.True));
-            }
-
-            if (_computeCount)
-                aggregateClauses.Add(ODataLiteral.Count);
-
-            if (aggregateClauses.Any())
-                text += "/" + string.Join("/", aggregateClauses);
-
-            if (extraClauses.Any())
-                text += "?" + string.Join("&", extraClauses);
-
-            return text;
+            get { return _details.ActionName; }
         }
 
         private IEnumerable<string> SplitItems(IEnumerable<string> columns)
@@ -538,58 +700,20 @@ namespace Simple.OData.Client
             return columns.SelectMany(x => x.Key.Split(',').Select(y => new KeyValuePair<string, bool>(y.Trim(), x.Value)));
         }
 
-        private string FormatExpandItem(string item, EntityCollection entityCollection)
-        {
-            var items = item.Split('/');
-            var associationName = _session.Metadata.GetNavigationPropertyExactName(entityCollection.ActualName, items.First());
-            string text;
-            if (_session.Adapter.AdapterVersion == AdapterVersion.V3)
-                text = associationName;
-            else
-                text = string.Format("{0}={1}", ODataLiteral.Expand, associationName);
-            if (items.Count() == 1)
-            {
-                return text;
-            }
-            else
-            {
-                item = item.Substring(items.First().Length + 1);
-                entityCollection = _session.Metadata.GetEntityCollection(
-                    _session.Metadata.GetNavigationPropertyPartnerName(entityCollection.ActualName, associationName));
-                if (_session.Adapter.AdapterVersion == AdapterVersion.V3)
-                    return string.Format("{0}/{1}", text, FormatExpandItem(item, entityCollection));
-                else
-                    return string.Format("{0}({1})", text, FormatExpandItem(item, entityCollection));
-            }
-        }
-
-        private string FormatSelectItem(string item)
-        {
-            return _session.Metadata.HasStructuralProperty(this.EntityCollection.ActualName, item)
-                ? _session.Metadata.GetStructuralPropertyExactName(this.EntityCollection.ActualName, item)
-                : _session.Metadata.GetNavigationPropertyExactName(this.EntityCollection.ActualName, item);
-        }
-
-        private string FormatOrderByItem(KeyValuePair<string, bool> item)
-        {
-            return _session.Metadata.GetStructuralPropertyExactName(
-                this.EntityCollection.ActualName, item.Key) + (item.Value ? " desc" : string.Empty);
-        }
-
         private IDictionary<string, object> TryInterpretFilterExpressionAsKey(ODataExpression expression)
         {
             bool ok = false;
             IDictionary<string, object> namedKeyValues = new Dictionary<string, object>();
             if (!ReferenceEquals(expression, null))
             {
-                ok = expression.ExtractEqualityComparisons(namedKeyValues);
+                ok = expression.ExtractLookupColumns(namedKeyValues);
             }
             if (!ok)
                 return null;
 
-            var keyNames = _session.Metadata.GetDeclaredKeyPropertyNames(this.EntityCollection.ActualName).ToList();
-            return keyNames.Count == namedKeyValues.Count() && keyNames.All(namedKeyValues.ContainsKey) 
-                ? namedKeyValues 
+            var keyNames = _details.Session.Metadata.GetDeclaredKeyPropertyNames(this.EntityCollection.Name).ToList();
+            return keyNames.Count == namedKeyValues.Count && Utils.AllMatch(keyNames, namedKeyValues.Keys, _details.Session.Pluralizer)
+                ? namedKeyValues
                 : null;
         }
 

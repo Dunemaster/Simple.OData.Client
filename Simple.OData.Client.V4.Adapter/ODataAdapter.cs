@@ -9,6 +9,17 @@ using Microsoft.OData.Core.UriParser;
 using Microsoft.OData.Edm;
 using Microsoft.OData.Edm.Csdl;
 using Microsoft.Spatial;
+using Simple.OData.Client.Extensions;
+
+#pragma warning disable 1591
+
+namespace Simple.OData.Client
+{
+    public static class V4Adapter
+    {
+        public static void Reference() { }
+    }
+}
 
 namespace Simple.OData.Client.V4.Adapter
 {
@@ -41,7 +52,11 @@ namespace Simple.OData.Client.V4.Adapter
         public ODataAdapter(ISession session, string protocolVersion, HttpResponseMessage response)
             : this(session, protocolVersion)
         {
-            using (var messageReader = new ODataMessageReader(new ODataResponseMessage(response)))
+            var readerSettings = new ODataMessageReaderSettings
+            {
+                MessageQuotas = { MaxReceivedMessageSize = Int32.MaxValue }
+            };
+            using (var messageReader = new ODataMessageReader(new ODataResponseMessage(response), readerSettings))
             {
                 Model = messageReader.ReadMetadataDocument();
             }
@@ -65,17 +80,14 @@ namespace Simple.OData.Client.V4.Adapter
             throw new InvalidOperationException(string.Format("Unsupported OData protocol version: \"{0}\"", this.ProtocolVersion));
         }
 
-        public override string ConvertValueToUriLiteral(object value)
-        {
-            return value is ODataExpression
-                ? (value as ODataExpression).AsString(_session)
-                : ODataUriUtils.ConvertToUriLiteral(value,
-                    (ODataVersion)Enum.Parse(typeof(ODataVersion), this.GetODataVersionString(), false), this.Model);
-        }
-
         public override IMetadata GetMetadata()
         {
             return new Metadata(_session, Model);
+        }
+
+        public override ICommandFormatter GetCommandFormatter()
+        {
+            return new CommandFormatter(_session);
         }
 
         public override IResponseReader GetResponseReader()
@@ -88,9 +100,9 @@ namespace Simple.OData.Client.V4.Adapter
             return new RequestWriter(_session, Model, deferredBatchWriter);
         }
 
-        public override IBatchWriter GetBatchWriter()
+        public override IBatchWriter GetBatchWriter(IDictionary<object, IDictionary<string, object>> batchEntries)
         {
-            return new BatchWriter(_session);
+            return new BatchWriter(_session, batchEntries);
         }
     }
 }

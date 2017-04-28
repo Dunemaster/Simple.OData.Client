@@ -2,32 +2,29 @@
 {
     internal class ExpressionContext
     {
-        private EntityCollection _entityCollection;
-
         public ISession Session { get; set; }
         public EntityCollection EntityCollection { get; set; }
-        //public EntityCollection EntityCollection
-        //{
-        //    get
-        //    {
-        //        if (!IsSet)
-        //            return null;
-        //        if (_entityCollection != null)
-        //            return _entityCollection;
+        public string ScopeQualifier { get; set; }
+        public string DynamicPropertiesContainerName { get; set; }
+        public bool IsQueryOption { get; set; }
 
-        //        return this.session.Metadata.GetConcreteEntityCollection(this.Collection);
-        //    }
-
-        //    set 
-        //    { 
-        //        _entityCollection = value; 
-        //    }
-        //}
-        public string Collection { get; set; }
-
-        public bool IsSet
+        public ExpressionContext(ISession session)
         {
-            get { return this.Session != null && (this._entityCollection != null || !string.IsNullOrEmpty(this.Collection)); }
+            this.Session = session;
+        }
+
+        public ExpressionContext(ISession session, EntityCollection entityCollection, string scopeQualifier, string dynamicPropertiesContainerName)
+        {
+            this.Session = session;
+            this.EntityCollection = entityCollection;
+            this.ScopeQualifier = scopeQualifier;
+            this.DynamicPropertiesContainerName = dynamicPropertiesContainerName;
+        }
+
+        public ExpressionContext(ISession session, bool isQueryOption)
+        {
+            this.Session = session;
+            this.IsQueryOption = isQueryOption;
         }
     }
 }

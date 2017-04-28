@@ -1,32 +1,43 @@
 ﻿using System.Collections.Generic;
 
+#pragma warning disable 1591
+
 namespace Simple.OData.Client
 {
     public interface IMetadata
     {
-        EntityCollection GetEntityCollection(string collectionName);
-        EntityCollection GetBaseEntityCollection(string collectionPath);
-        EntityCollection GetConcreteEntityCollection(string collectionPath);
+        ISession Session { get; }
+
+        EntityCollection GetEntityCollection(string collectionPath);
         EntityCollection GetDerivedEntityCollection(EntityCollection baseCollection, string entityTypeName);
+        EntityCollection NavigateToCollection(string path);
+        EntityCollection NavigateToCollection(EntityCollection rootCollection, string path);
 
         string GetEntityCollectionExactName(string collectionName);
-        string GetEntityCollectionTypeName(string collectionName);
-        string GetEntityCollectionTypeNamespace(string collectionName);
-        bool EntityCollectionTypeRequiresOptimisticConcurrencyCheck(string collectionName);
+        bool EntityCollectionRequiresOptimisticConcurrencyCheck(string collectionName);
 
-        string GetEntityTypeExactName(string entityTypeName);
+        string GetEntityTypeExactName(string collectionName);
+        string GetLinkedCollectionName(string instanceTypeName, string typeName, out bool isSingleton);
 
-        IEnumerable<string> GetStructuralPropertyNames(string entitySetName);
-        bool HasStructuralProperty(string entitySetName, string propertyName);
-        string GetStructuralPropertyExactName(string entitySetName, string propertyName);
-        IEnumerable<string> GetDeclaredKeyPropertyNames(string entitySetName);
+        string GetQualifiedTypeName(string typeOrCollectionName);
 
-        bool HasNavigationProperty(string entitySetName, string propertyName);
-        string GetNavigationPropertyExactName(string entitySetName, string propertyName);
-        string GetNavigationPropertyPartnerName(string entitySetName, string propertyName);
-        bool IsNavigationPropertyMultiple(string entitySetName, string propertyName);
+        bool IsOpenType(string collectionName);
+        bool IsTypeWithId(string typeName);
+        IEnumerable<string> GetStructuralPropertyNames(string collectionName);
+        bool HasStructuralProperty(string collectionName, string propertyName);
+        string GetStructuralPropertyExactName(string collectionName, string propertyName);
+        IEnumerable<string> GetDeclaredKeyPropertyNames(string collectionName);
 
-        string GetFunctionExactName(string functionName);
+        bool HasNavigationProperty(string collectionName, string propertyName);
+        string GetNavigationPropertyExactName(string collectionName, string propertyName);
+        string GetNavigationPropertyPartnerTypeName(string collectionName, string propertyName);
+        bool IsNavigationPropertyCollection(string collectionName, string propertyName);
+
+        string GetFunctionFullName(string functionName);
+        EntityCollection GetFunctionReturnCollection(string functionName);
+        string GetFunctionVerb(string functionName);
+        string GetActionFullName(string actionName);
+        EntityCollection GetActionReturnCollection(string functionName);
 
         EntryDetails ParseEntryDetails(string collectionName, IDictionary<string, object> entryData, string contentId = null);
     }

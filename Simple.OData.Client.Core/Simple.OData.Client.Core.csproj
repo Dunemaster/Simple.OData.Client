@@ -16,6 +16,7 @@
     <ProjectTypeGuids>{786C830F-07A1-408B-BD7F-6EE04809D6DB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
     <RestorePackages>true</RestorePackages>
+    <NuGetPackageImportStamp>4b65714b</NuGetPackageImportStamp>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -25,7 +26,7 @@
     <DefineConstants>TRACE;DEBUG;PORTABLE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -46,13 +47,19 @@
     </Compile>
     <Compile Include="Adapter\AdapterVersion.cs" />
     <Compile Include="Adapter\BatchWriterBase.cs" />
+    <Compile Include="Adapter\CommandFormatterBase.cs" />
+    <Compile Include="Adapter\FunctionFormat.cs" />
+    <Compile Include="Adapter\ICommandFormatter.cs" />
     <Compile Include="Adapter\IODataAdapter.cs" />
     <Compile Include="Adapter\MetadataBase.cs" />
     <Compile Include="Adapter\RequestWriterBase.cs" />
     <Compile Include="Adapter\ResponseNode.cs" />
     <Compile Include="Adapter\ResponseReaderBase.cs" />
+    <Compile Include="Expressions\ColumnExpression.cs" />
     <Compile Include="Extensions\MemberInfoExtensions.cs" />
-    <Compile Include="Fluent\IFluentClient.cs" />
+    <Compile Include="Fluent\CommandDetails.cs" />
+    <Compile Include="Fluent\FluentClientBase.cs" />
+    <Compile Include="Fluent\IBoundClient.cs" />
     <Compile Include="Extensions\DictionaryExtensions.cs" />
     <Compile Include="EntryDetails.cs" />
     <Compile Include="Extensions\EnumerableOfKeyValuePairExtensions.cs" />
@@ -62,14 +69,23 @@
     <Compile Include="Extensions\XElementExtensions.cs" />
     <Compile Include="Expressions\ExpressionContext.cs" />
     <Compile Include="Expressions\ExpressionFunction.cs" />
-    <Compile Include="Expressions\ExpressionOperator.cs" />
     <Compile Include="Expressions\ODataExpression.cs" />
     <Compile Include="Expressions\ODataExpression.Format.cs" />
     <Compile Include="Expressions\ODataExpression.Operators.cs" />
     <Compile Include="Expressions\ODataExpression.Linq.cs" />
     <Compile Include="Expressions\FunctionMapping.cs" />
+    <Compile Include="Fluent\IFluentClient.cs" />
+    <Compile Include="Fluent\IMediaClient.cs" />
+    <Compile Include="Fluent\IUnboundClient.cs" />
+    <Compile Include="Fluent\MediaClient.cs" />
+    <Compile Include="Fluent\UnboundClient.cs" />
+    <Compile Include="Http\HttpConnection.cs" />
     <Compile Include="Http\HttpLiteral.cs" />
     <Compile Include="Http\RestVerbs.cs" />
+    <Compile Include="ODataExpandOptions.cs" />
+    <Compile Include="ODataFeedAnnotations.cs" />
+    <Compile Include="ODataEntryAnnotations.cs" />
+    <Compile Include="ODataMediaAnnotations.cs" />
     <Compile Include="ODataPayloadFormat.cs" />
     <Compile Include="ODataLiteral.cs" />
     <Compile Include="ODataRequest.cs" />
@@ -86,17 +102,19 @@
     <Compile Include="ODataClient.cs" />
     <Compile Include="ODataClient.Internals.cs" />
     <Compile Include="ODataClientSettings.cs" />
-    <Compile Include="Fluent\FluentClient.Async.cs" />
-    <Compile Include="Fluent\FluentClient.cs" />
+    <Compile Include="Fluent\BoundClient.Async.cs" />
+    <Compile Include="Fluent\BoundClient.cs" />
     <Compile Include="Fluent\FluentCommand.cs" />
     <Compile Include="ODataEntry.cs" />
     <Compile Include="ODataResponse.cs" />
     <Compile Include="ODataProtocolVersion.cs" />
+    <Compile Include="ODataTrace.cs" />
+    <Compile Include="ODataUpdateMethod.cs" />
     <Compile Include="Pluralizer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Http\RequestBuilder.cs" />
     <Compile Include="Http\RequestRunner.cs" />
     <Compile Include="Adapter\ODataAdapterBase.cs" />
+    <Compile Include="ODataNamespace.cs" />
     <Compile Include="Session.cs" />
     <Compile Include="Adapter\AdapterFactory.cs" />
     <Compile Include="EntityCollection.cs" />
@@ -112,21 +130,23 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Net.Http">
-      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.22\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.dll</HintPath>
+      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.28\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.dll</HintPath>
     </Reference>
     <Reference Include="System.Net.Http.Extensions">
-      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.22\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.Extensions.dll</HintPath>
+      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.28\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.Extensions.dll</HintPath>
     </Reference>
     <Reference Include="System.Net.Http.Primitives">
-      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.22\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.Primitives.dll</HintPath>
+      <HintPath>..\Solutions\packages\Microsoft.Net.Http.2.2.28\lib\portable-net40+sl4+win8+wp71+wpa81\System.Net.Http.Primitives.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup />
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />
-  <Import Project="..\Solutions\packages\Microsoft.Bcl.Build.1.0.14\tools\Microsoft.Bcl.Build.targets" Condition="Exists('..\Solutions\packages\Microsoft.Bcl.Build.1.0.14\tools\Microsoft.Bcl.Build.targets')" />
-  <Target Name="EnsureBclBuildImported" BeforeTargets="BeforeBuild" Condition="'$(BclBuildImported)' == ''">
-    <Error Condition="!Exists('..\Solutions\packages\Microsoft.Bcl.Build.1.0.14\tools\Microsoft.Bcl.Build.targets')" Text="This project references NuGet package(s) that are missing on this computer. Enable NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=317567." HelpKeyword="BCLBUILD2001" />
-    <Error Condition="Exists('..\Solutions\packages\Microsoft.Bcl.Build.1.0.14\tools\Microsoft.Bcl.Build.targets')" Text="The build restored NuGet packages. Build the project again to include these packages in the build. For more information, see http://go.microsoft.com/fwlink/?LinkID=317568." HelpKeyword="BCLBUILD2002" />
+  <Import Project="..\Solutions\packages\Microsoft.Bcl.Build.1.0.21\build\Microsoft.Bcl.Build.targets" Condition="Exists('..\Solutions\packages\Microsoft.Bcl.Build.1.0.21\build\Microsoft.Bcl.Build.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Enable NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\Solutions\packages\Microsoft.Bcl.Build.1.0.21\build\Microsoft.Bcl.Build.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\Solutions\packages\Microsoft.Bcl.Build.1.0.21\build\Microsoft.Bcl.Build.targets'))" />
   </Target>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

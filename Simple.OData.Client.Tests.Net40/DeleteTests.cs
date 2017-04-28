@@ -32,14 +32,14 @@ namespace Simple.OData.Client.Tests
         }
 
         [Fact]
-        public async Task DeleteByKeyResetMetadataCache()
+        public async Task DeleteByKeyClearMetadataCache()
         {
             var product = await _client
                 .For("Products")
                 .Set(new { ProductName = "Test1", UnitPrice = 18m })
                 .InsertEntryAsync();
 
-            (_client as ODataClient).Session.ResetMetadataCache();
+            (_client as ODataClient).Session.ClearMetadataCache();
             await _client
                 .For("Products")
                 .Key(product["ProductID"])
@@ -64,7 +64,31 @@ namespace Simple.OData.Client.Tests
             await _client
                 .For("Products")
                 .Filter("ProductName eq 'Test1'")
-                .DeleteEntryAsync();
+                .DeleteEntriesAsync();
+
+            product = await _client
+                .For("Products")
+                .Filter("ProductName eq 'Test1'")
+                .FindEntryAsync();
+
+            Assert.Null(product);
+        }
+
+        [Fact]
+        public async Task DeleteByFilterFromCommand()
+        {
+            var product = await _client
+                .For("Products")
+                .Set(new { ProductName = "Test1", UnitPrice = 18m })
+                .InsertEntryAsync();
+
+            var commandText = await _client
+                .For("Products")
+                .Filter("ProductName eq 'Test1'")
+                .GetCommandTextAsync();
+
+            await _client
+                .DeleteEntriesAsync("Products", commandText);
 
             product = await _client
                 .For("Products")
@@ -93,6 +117,30 @@ namespace Simple.OData.Client.Tests
                 .FindEntryAsync();
 
             Assert.Null(product);
+        }
+
+        [Fact]
+        public async Task DeleteDerived()
+        {
+            var ship = await _client
+                .For("Transport")
+                .As("Ship")
+                .Set(new { ShipName = "Test1" })
+                .InsertEntryAsync();
+
+            await _client
+                .For("Transport")
+                .As("Ship")
+                .Key(ship["TransportID"])
+                .DeleteEntryAsync();
+
+            ship = await _client
+                .For("Transport")
+                .As("Ship")
+                .Filter("ShipName eq 'Test1'")
+                .FindEntryAsync();
+
+            Assert.Null(ship);
         }
     }
 }
